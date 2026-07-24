@@ -17,6 +17,31 @@ from .db import get_collection
 from .embeddings import embed_texts
 
 
+# Palabras ordinales usadas en la numeración de artículos ("Artículo primero").
+_ORDINALS = {
+    "primero": 1, "segundo": 2, "tercero": 3, "cuarto": 4, "quinto": 5,
+    "sexto": 6, "septimo": 7, "séptimo": 7, "octavo": 8, "noveno": 9,
+    "decimo": 10, "décimo": 10, "undecimo": 11, "undécimo": 11,
+    "duodecimo": 12, "duodécimo": 12, "unico": 1, "único": 1,
+}
+
+# Detecta encabezados de artículo: "Artículo 1", "Art. 12", "Artículo primero".
+_ART_RE = re.compile(
+    r"\bart[íi]culo?s?\.?\s+(\d{1,4}|"
+    + "|".join(_ORDINALS.keys())
+    + r")\b",
+    re.IGNORECASE,
+)
+
+
+def _article_number(token: str) -> int | None:
+    """Convierte el token capturado ('12' o 'primero') a un número de artículo."""
+    token = token.lower()
+    if token.isdigit():
+        return int(token)
+    return _ORDINALS.get(token)
+
+
 def _clean(text: str) -> str:
     """Normaliza espacios en blanco del texto extraído del PDF."""
     text = text.replace("\x00", " ")
@@ -85,11 +110,48 @@ def ingest_pdf(pdf_path: str | Path, source_name: str | None = None) -> Dict[str
     metadatas: List[Dict[str, object]] = []
     ids: List[str] = []
 
+    current_article: int | None = None  # último artículo visto (se arrastra entre páginas)
+    seq = 0                              # orden global del fragmento (para reordenar luego)
+
     for page_num, page_text in enumerate(pages, start=1):
+        # Posiciones y números de los encabezados de artículo en esta página.
+        markers = [
+            (m.start(), _article_number(m.group(1)))
+            for m in _ART_RE.finditer(page_text)
+        ]
+        markers = [(pos, num) for pos, num in markers if num is not None]
+
+        cursor = 0
         for chunk_idx, chunk in enumerate(_chunk_text(page_text)):
+            # Localizar el fragmento dentro de la página para saber su artículo.
+            idx = page_text.find(chunk, cursor)
+            start = idx if idx != -1 else cursor
+            cursor = start + len(chunk)
+
+            # Artículo activo al inicio del fragmento (arrastrando el anterior).
+            article = current_article
+            for pos, num in markers:
+                if pos <= start:
+                    article = num
+                else:
+                    break
+
+            meta: Dict[str, object] = {"source": source, "page": page_num, "seq": seq}
+            if article is not None:
+                meta["articulo"] = article
+
             documents.append(chunk)
-            metadatas.append({"source": source, "page": page_num})
+            metadatas.append(meta)
             ids.append(f"{source}::p{page_num}::c{chunk_idx}")
+            seq += 1
+
+            # Arrastrar el último artículo que aparece dentro de este fragmento.
+            for pos, num in markers:
+                if pos < cursor:
+                    current_article = num
+
+        if markers:
+            current_article = markers[-1][1]
 
     if not documents:
         raise ValueError(

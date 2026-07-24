@@ -40,6 +40,12 @@ TOP_K: int = int(os.getenv("TOP_K", "5"))          # fragmentos a devolver por c
 CHUNK_SIZE: int = int(os.getenv("CHUNK_SIZE", "800"))       # caracteres por fragmento
 CHUNK_OVERLAP: int = int(os.getenv("CHUNK_OVERLAP", "150"))  # solapamiento entre fragmentos
 
+# Puntaje mínimo (0-1) para que un fragmento se considere relevante en la
+# búsqueda semántica. Fragmentos por debajo de este umbral se descartan.
+MIN_SCORE: float = float(os.getenv("MIN_SCORE", "0.30"))
+# Máximo de fragmentos a devolver cuando se consulta un artículo específico.
+MAX_ARTICLE_CHUNKS: int = int(os.getenv("MAX_ARTICLE_CHUNKS", "12"))
+
 # --- Administración ----------------------------------------------------------
 # Contraseña para el panel de Gradio. Cambiar en el archivo .env para producción.
 ADMIN_PASSWORD: str = os.getenv("ADMIN_PASSWORD", "cambia-esta-clave")
