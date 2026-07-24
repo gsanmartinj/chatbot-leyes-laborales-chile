@@ -1,0 +1,13 @@
+# Interfaces web
+streamlit>=1.36
+gradio>=4.44
+
+# Base vectorial y embeddings locales
+chromadb>=0.5.5
+sentence-transformers>=3.0
+
+# Extracción de texto de PDF
+pypdf>=4.3
+
+# Variables de entorno (.env)
+python-dotenv>=1.0

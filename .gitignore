@@ -1,0 +1,13 @@
+# Entorno
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Datos generados (base vectorial y PDFs cargados)
+data/chroma/
+data/pdfs/
+
+# Caché de modelos de HuggingFace (si se guarda localmente)
+.cache/
