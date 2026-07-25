@@ -46,6 +46,14 @@ MIN_SCORE: float = float(os.getenv("MIN_SCORE", "0.30"))
 # Máximo de fragmentos a devolver cuando se consulta un artículo específico.
 MAX_ARTICLE_CHUNKS: int = int(os.getenv("MAX_ARTICLE_CHUNKS", "12"))
 
+# --- Motor de redacción (opcional): Gemini ----------------------------------
+# Si defines GEMINI_API_KEY, las respuestas del chat se redactan con Gemini a
+# partir de los fragmentos recuperados localmente (RAG). Si la dejas vacía, la
+# app funciona 100% local mostrando los fragmentos tal cual (comportamiento por
+# defecto). Obtén una clave gratuita en https://aistudio.google.com/apikey
+GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
 # --- Administración ----------------------------------------------------------
 # Contraseña para el panel de Gradio. Cambiar en el archivo .env para producción.
 ADMIN_PASSWORD: str = os.getenv("ADMIN_PASSWORD", "cambia-esta-clave")

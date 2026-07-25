@@ -87,6 +87,28 @@ Fuentes oficiales chilenas (documentos públicos):
 > Usa PDF con **texto seleccionable**. Los PDF escaneados (solo imagen) no tienen
 > texto extraíble; requerirían OCR previo.
 
+## (Opcional) Respuestas redactadas con Gemini
+
+Por defecto el chat muestra los **fragmentos** relevantes de los PDF. Si prefieres
+que un modelo **redacte** una respuesta en lenguaje natural (basada solo en esos
+fragmentos), puedes activar Gemini:
+
+1. Consigue una clave gratuita en https://aistudio.google.com/apikey
+2. En tu archivo `.env`, define:
+   ```
+   GEMINI_API_KEY=tu_clave_aqui
+   GEMINI_MODEL=gemini-2.5-flash
+   ```
+3. Reinicia el chat. Verás en la barra lateral "🔮 Gemini (redacción)".
+
+Cómo funciona: la **búsqueda sigue siendo local**; solo los fragmentos recuperados
+y tu pregunta se envían a Gemini, que redacta la respuesta citando las fuentes.
+
+- Si **no** defines la clave, la app funciona 100% local (sin enviar nada a la nube).
+- Si Gemini falla (sin internet, límite excedido), el chat vuelve automáticamente
+  al modo local mostrando los fragmentos.
+- ⚠️ Con Gemini activo, tus textos y preguntas salen hacia los servidores de Google.
+
 ## Notas y limitaciones
 
 - **Concurrencia:** pensado para uso local de baja concurrencia. ChromaDB usa SQLite;

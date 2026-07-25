@@ -14,7 +14,21 @@ import streamlit as st
 
 from core.config import LEGAL_DISCLAIMER
 from core.ingest import stats
-from core.search import format_answer, search
+from core.llm import gemini_available
+from core.search import answer
+
+
+def _sources_md(hits) -> str:
+    """Lista compacta de fuentes para adjuntar bajo una respuesta redactada."""
+    if not hits:
+        return ""
+    lineas = ["\n\n---\n**📚 Fuentes:**"]
+    for h in hits:
+        cita = f"- 📄 *{h['source']}* — pág. {h['page']}"
+        if h.get("articulo"):
+            cita += f" · Art. {h['articulo']}"
+        lineas.append(cita)
+    return "\n".join(lineas)
 
 st.set_page_config(
     page_title="Asistente Laboral Chile",
@@ -79,9 +93,17 @@ if pregunta:
                 "no puedo responder. Pide al administrador que suba PDF."
             )
         else:
-            with st.spinner("Buscando en los documentos…"):
-                hits = search(pregunta)
-                respuesta = format_answer(hits)
+            spinner_txt = (
+                "Redactando respuesta con Gemini…"
+                if gemini_available()
+                else "Buscando en los documentos…"
+            )
+            with st.spinner(spinner_txt):
+                res = answer(pregunta)
+                respuesta = res["text"]
+                # En modo redactado, adjuntar la lista de fuentes bajo la respuesta.
+                if res["mode"] in ("gemini", "local-fallback"):
+                    respuesta += _sources_md(res["hits"])
         st.markdown(respuesta)
 
     st.session_state.messages.append({"role": "assistant", "content": respuesta})
@@ -89,13 +111,21 @@ if pregunta:
 # --- Barra lateral ------------------------------------------------------------
 with st.sidebar:
     st.header("ℹ️ Acerca de")
-    st.markdown(
-        "Este asistente **no usa IA en la nube**. Funciona con búsqueda "
-        "semántica local sobre los PDF cargados y **cita la fuente** de cada "
-        "respuesta (documento y página).\n\n"
-        "No genera texto nuevo: solo muestra lo que está escrito en los "
-        "documentos oficiales que cargó el administrador."
-    )
+    if gemini_available():
+        st.markdown(
+            "**Motor:** 🔮 Gemini (redacción) + búsqueda semántica local.\n\n"
+            "La búsqueda de los fragmentos ocurre en tu equipo; luego **Gemini "
+            "redacta** la respuesta usando únicamente esos fragmentos y cita la "
+            "fuente. Los textos recuperados y tu pregunta se envían a Google."
+        )
+    else:
+        st.markdown(
+            "**Motor:** 💻 100% local (sin IA en la nube).\n\n"
+            "Búsqueda semántica local sobre los PDF cargados; **cita la fuente** "
+            "(documento y página) y no genera texto nuevo.\n\n"
+            "_Para respuestas redactadas en lenguaje natural, configura una "
+            "`GEMINI_API_KEY` en el archivo `.env`._"
+        )
     if st.button("🗑️ Limpiar conversación"):
         st.session_state.messages = st.session_state.messages[:1]
         st.rerun()
