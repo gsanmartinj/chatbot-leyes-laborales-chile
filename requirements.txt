@@ -12,6 +12,8 @@ pypdf>=4.3
 # Variables de entorno (.env)
 python-dotenv>=1.0
 
-# (Opcional) Redacción de respuestas con Gemini. Solo se usa si defines
-# GEMINI_API_KEY en el .env; si no, la app funciona sin este paquete.
-google-genai>=1.0
+# (Opcional) Redacción de respuestas con un modelo de lenguaje.
+# Solo se usan si configuras el proveedor en el .env; si no, la app
+# funciona sin estos paquetes.
+openai>=1.40          # endpoints compatibles con OpenAI (DeepSeek vía NVIDIA)
+google-genai>=1.0     # alternativa: Gemini

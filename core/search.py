@@ -130,24 +130,24 @@ def search(question: str, top_k: int = TOP_K) -> List[Dict[str, object]]:
 def answer(question: str, top_k: int = TOP_K) -> Dict[str, object]:
     """Devuelve la respuesta lista para mostrar, con su modo y fuentes.
 
-    Si Gemini está configurado, redacta la respuesta a partir de los fragmentos
+    Si hay un modelo configurado, redacta la respuesta a partir de los fragmentos
     recuperados; si no (o si la llamada falla), usa el modo local mostrando los
     fragmentos tal cual.
 
     Returns:
-        dict {"text": markdown, "hits": fragmentos, "mode": "gemini"|"local"|"local-fallback"}.
+        dict {"text": markdown, "hits": fragmentos, "mode": "llm"|"local"|"local-fallback"}.
     """
     hits = search(question, top_k=top_k)
 
-    # Import diferido para no requerir el paquete de Gemini en modo local.
-    from .llm import gemini_available, generate_answer
+    # Import diferido para no requerir los paquetes del proveedor en modo local.
+    from .llm import generate_answer, llm_available
 
-    if hits and gemini_available():
+    if hits and llm_available():
         try:
-            return {"text": generate_answer(question, hits), "hits": hits, "mode": "gemini"}
+            return {"text": generate_answer(question, hits), "hits": hits, "mode": "llm"}
         except Exception as exc:  # noqa: BLE001 - ante cualquier fallo, caer a local
             texto = (
-                f"*No fue posible redactar la respuesta con Gemini ({exc}). "
+                f"*No fue posible redactar la respuesta con el modelo ({exc}). "
                 "Se muestran los fragmentos encontrados.*\n\n" + format_answer(hits)
             )
             return {"text": texto, "hits": hits, "mode": "local-fallback"}

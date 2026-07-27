@@ -14,7 +14,7 @@ import streamlit as st
 
 from core.config import LEGAL_DISCLAIMER
 from core.ingest import stats
-from core.llm import gemini_available
+from core.llm import llm_available, provider_label
 from core.search import answer
 from ui.streamlit_ui import CSS, SUGGESTIONS, header_html, strip_html, warn_html
 
@@ -56,13 +56,10 @@ except Exception as exc:  # noqa: BLE001
     st.error(f"No se pudo abrir la base de datos: {exc}")
     st.stop()
 
-usa_gemini = gemini_available()
+usa_llm = llm_available()
+motor = provider_label()
 st.markdown(
-    strip_html(
-        base["documentos"],
-        base["fragmentos"],
-        "Gemini" if usa_gemini else "Local",
-    ),
+    strip_html(base["documentos"], base["fragmentos"], motor),
     unsafe_allow_html=True,
 )
 
@@ -111,11 +108,11 @@ if pregunta:
                 "no puedo responder su consulta."
             )
         else:
-            spinner = "Redactando respuesta" if usa_gemini else "Buscando en los documentos"
+            spinner = "Redactando respuesta" if usa_llm else "Buscando en los documentos"
             with st.spinner(spinner):
                 res = answer(pregunta)
                 respuesta = res["text"]
-                if res["mode"] in ("gemini", "local-fallback"):
+                if res["mode"] in ("llm", "local-fallback"):
                     respuesta += _sources_md(res["hits"])
         st.markdown(respuesta)
 
@@ -124,20 +121,21 @@ if pregunta:
 # --- Barra lateral ------------------------------------------------------------
 with st.sidebar:
     st.markdown('<p class="lex-side-t">Cómo funciona</p>', unsafe_allow_html=True)
-    if usa_gemini:
+    if usa_llm:
         st.markdown(
-            "**Motor:** Gemini (redacción) sobre búsqueda semántica local.\n\n"
-            "La búsqueda de los fragmentos ocurre en este equipo. Luego **Gemini "
-            "redacta** la respuesta usando únicamente esos fragmentos y cita la "
-            "fuente. Su pregunta y los textos recuperados se envían a Google."
+            f"**Motor:** {motor} (redacción) sobre búsqueda semántica local.\n\n"
+            "La búsqueda de los fragmentos ocurre en este equipo. Luego el modelo "
+            "**redacta** la respuesta usando únicamente esos fragmentos y cita la "
+            "fuente. Su pregunta y los textos recuperados se envían al proveedor "
+            "del modelo."
         )
     else:
         st.markdown(
             "**Motor:** local, sin servicios en la nube.\n\n"
             "Búsqueda semántica sobre los documentos cargados. Se muestran los "
             "fragmentos pertinentes con su fuente; no se genera texto nuevo.\n\n"
-            "_Para obtener respuestas redactadas, configure una `GEMINI_API_KEY` "
-            "en el archivo `.env`._"
+            "_Para obtener respuestas redactadas, configure `LLM_API_KEY` en el "
+            "archivo `.env`._"
         )
 
     st.markdown("---")

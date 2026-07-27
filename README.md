@@ -94,27 +94,36 @@ Fuentes oficiales chilenas (documentos públicos):
 > Usa PDF con **texto seleccionable**. Los PDF escaneados (solo imagen) no tienen
 > texto extraíble; requerirían OCR previo.
 
-## (Opcional) Respuestas redactadas con Gemini
+## (Opcional) Respuestas redactadas por un modelo
 
 Por defecto el chat muestra los **fragmentos** relevantes de los PDF. Si prefieres
 que un modelo **redacte** una respuesta en lenguaje natural (basada solo en esos
-fragmentos), puedes activar Gemini:
+fragmentos), configura un proveedor en `.env`.
 
-1. Consigue una clave gratuita en https://aistudio.google.com/apikey
-2. En tu archivo `.env`, define:
-   ```
-   GEMINI_API_KEY=tu_clave_aqui
-   GEMINI_MODEL=gemini-2.5-flash
-   ```
-3. Reinicia el chat. Verás en la barra lateral "🔮 Gemini (redacción)".
+**Opción A — DeepSeek V4 Pro** (u otro endpoint compatible con OpenAI).
+Clave en https://build.nvidia.com:
+```
+LLM_API_KEY=tu_clave_aqui
+LLM_BASE_URL=https://integrate.api.nvidia.com/v1
+LLM_MODEL=deepseek-ai/deepseek-v4-pro
+```
+
+**Opción B — Gemini.** Clave gratuita en https://aistudio.google.com/apikey:
+```
+GEMINI_API_KEY=tu_clave_aqui
+```
+
+Con `LLM_PROVIDER=auto` (por defecto) se usa DeepSeek si hay `LLM_API_KEY`; si no,
+Gemini; si no hay ninguna, modo local.
 
 Cómo funciona: la **búsqueda sigue siendo local**; solo los fragmentos recuperados
-y tu pregunta se envían a Gemini, que redacta la respuesta citando las fuentes.
+y tu pregunta se envían al proveedor, que redacta la respuesta citando las fuentes.
 
-- Si **no** defines la clave, la app funciona 100% local (sin enviar nada a la nube).
-- Si Gemini falla (sin internet, límite excedido), el chat vuelve automáticamente
-  al modo local mostrando los fragmentos.
-- ⚠️ Con Gemini activo, tus textos y preguntas salen hacia los servidores de Google.
+- Sin proveedor configurado, la app funciona 100% local (no sale nada del equipo).
+- Si la llamada falla, se reintenta hasta 3 veces y, si aun así falla, el chat
+  vuelve automáticamente al modo local mostrando los fragmentos.
+- Nunca escribas la clave en el código: va en `.env`, que está en `.gitignore`.
+- ⚠️ Con un proveedor activo, tus textos y preguntas salen hacia sus servidores.
 
 ## Notas y limitaciones
 
