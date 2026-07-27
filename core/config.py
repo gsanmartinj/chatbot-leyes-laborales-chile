@@ -60,7 +60,7 @@ ADMIN_PASSWORD: str = os.getenv("ADMIN_PASSWORD", "cambia-esta-clave")
 
 # Aviso legal que se muestra en las respuestas.
 LEGAL_DISCLAIMER: str = (
-    "⚠️ Esta información proviene de los documentos cargados y tiene fines "
-    "orientativos. No constituye asesoría legal. Para casos concretos consulta "
-    "a un abogado o a la Dirección del Trabajo."
+    "*Esta información proviene de los documentos cargados y tiene fines "
+    "orientativos. No constituye asesoría legal. Para casos particulares, "
+    "consulte a un abogado o a la Dirección del Trabajo.*"
 )

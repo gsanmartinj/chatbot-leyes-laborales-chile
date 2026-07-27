@@ -147,8 +147,8 @@ def answer(question: str, top_k: int = TOP_K) -> Dict[str, object]:
             return {"text": generate_answer(question, hits), "hits": hits, "mode": "gemini"}
         except Exception as exc:  # noqa: BLE001 - ante cualquier fallo, caer a local
             texto = (
-                f"⚠️ No se pudo usar Gemini ({exc}). Mostrando los fragmentos "
-                "encontrados:\n\n" + format_answer(hits)
+                f"*No fue posible redactar la respuesta con Gemini ({exc}). "
+                "Se muestran los fragmentos encontrados.*\n\n" + format_answer(hits)
             )
             return {"text": texto, "hits": hits, "mode": "local-fallback"}
 
@@ -166,7 +166,7 @@ def format_answer(hits: List[Dict[str, object]]) -> str:
 
     partes = ["Esto es lo que encontré en los documentos cargados:\n"]
     for i, hit in enumerate(hits, start=1):
-        cita = f"📄 *{hit['source']}* — pág. {hit['page']}"
+        cita = f"*{hit['source']}* — pág. {hit['page']}"
         if hit.get("articulo"):
             cita += f" · Art. {hit['articulo']}"
         partes.append(f"**{i}. {cita}**\n\n> {hit['texto']}\n")

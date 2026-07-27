@@ -26,12 +26,19 @@ Bajo el capó:
 - Al preguntar, la consulta se vectoriza y se recuperan los fragmentos más cercanos.
 
 ```
-core/           # lógica compartida (config, db, embeddings, ingesta, búsqueda)
+core/             # lógica: config, db, embeddings, ingesta, búsqueda, Gemini
+ui/               # capa visual: CSS y componentes de cada app
 app_streamlit.py  # chat (usuarios)
 app_gradio.py     # panel admin (subir PDF)
-data/pdfs/      # copia de los PDF cargados
-data/chroma/    # base vectorial persistente
+.streamlit/       # tema base de Streamlit
+data/pdfs/        # copia de los PDF cargados
+data/chroma/      # base vectorial persistente
 ```
+
+**Diseño.** Dirección editorial jurídica: papel cálido con grano, tipografías
+Fraunces (títulos) y Newsreader (prosa), acento bordeaux. El chat va en claro y
+el panel de administración en oscuro, para distinguir la cara pública de la
+trastienda. Las fuentes se cargan desde Google Fonts.
 
 ## Instalación
 

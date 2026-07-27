@@ -1,0 +1,14 @@
+# Tema base de Streamlit. Alinea los widgets nativos con la paleta editorial
+# definida en ui/streamlit_ui.py (papel cálido, tinta y acento bordeaux).
+[theme]
+base = "light"
+primaryColor = "#A03033"
+backgroundColor = "#F4F0E6"
+secondaryBackgroundColor = "#EDE7D8"
+textColor = "#171B24"
+
+[client]
+toolbarMode = "minimal"
+
+[browser]
+gatherUsageStats = false
