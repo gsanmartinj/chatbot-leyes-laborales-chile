@@ -94,6 +94,23 @@ Fuentes oficiales chilenas (documentos públicos):
 > Usa PDF con **texto seleccionable**. Los PDF escaneados (solo imagen) no tienen
 > texto extraíble; requerirían OCR previo.
 
+## Revisión de contratos
+
+La app de chat tiene una segunda pestaña, **«Revisar contrato»**: se sube un
+contrato en PDF, Word o pegando el texto, y se obtienen los problemas detectados
+con su recomendación, ordenados por gravedad y con el fundamento normativo.
+
+- **El contrato no se guarda ni se indexa.** Se procesa en memoria y se descarta:
+  contiene datos personales y contaminaría el corpus normativo.
+- **Modo estricto.** Solo se reportan problemas respaldados por los PDF cargados.
+  Los hallazgos que el modelo no logra fundamentar en un documento real de la
+  base **se descartan automáticamente** y se informa cuántos fueron.
+- Por eso **la calidad depende del corpus**: con pocos documentos se detectará
+  poco. Cargue el Código del Trabajo para una revisión completa.
+- Requiere un modelo configurado (ver la sección siguiente): la búsqueda por sí
+  sola no puede evaluar un contrato.
+- El informe puede descargarse en Markdown.
+
 ## (Opcional) Respuestas redactadas por un modelo
 
 Por defecto el chat muestra los **fragmentos** relevantes de los PDF. Si prefieres

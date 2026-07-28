@@ -181,6 +181,68 @@ CSS = """
 [data-testid="stSidebar"] .stButton>button{color:#B9B3A4;border-color:rgba(255,255,255,.16);}
 [data-testid="stSidebar"] .stButton>button:hover{background:var(--accent);border-color:var(--accent);color:#FCFAF4;}
 
+/* ---------- pestañas ---------- */
+.stTabs [role="tablist"]{border-bottom:1px solid var(--rule);gap:1.8rem;}
+.stTabs [role="tab"]{
+  font-family:var(--display)!important;font-size:.93rem!important;letter-spacing:.01em;
+  color:var(--ink-3)!important;background:transparent!important;padding:.4rem 0!important;
+}
+.stTabs [role="tab"][aria-selected="true"]{color:var(--ink)!important;}
+.stTabs [data-baseweb="tab-highlight"],.stTabs [role="tablist"] div[data-baseweb="tab-border"]{background:var(--accent)!important;}
+
+/* ---------- revisión de contratos ---------- */
+.lex-note{
+  font-family:var(--serif)!important;font-size:.95rem!important;line-height:1.55;
+  color:var(--ink-3)!important;border-left:2px solid var(--rule);
+  padding:.15rem 0 .15rem .85rem;margin:.2rem 0 1.5rem;
+}
+.lex-sum{
+  display:flex;flex-wrap:wrap;gap:2rem;align-items:baseline;
+  border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);
+  padding:.8rem 0;margin:1.6rem 0 1.9rem;
+}
+.lex-sum .n{font-family:var(--display)!important;font-size:1.55rem;line-height:1;color:var(--ink);}
+.lex-sum .n.alta{color:var(--accent);}
+.lex-sum .n.media{color:var(--ochre);}
+.lex-sum .l{
+  font-family:var(--display)!important;font-size:.61rem;font-weight:600;
+  letter-spacing:.19em;text-transform:uppercase;color:var(--ink-3);
+}
+.lex-find{
+  background:var(--paper-card);border:1px solid var(--rule);border-left:3px solid var(--ink-3);
+  border-radius:2px 9px 9px 2px;padding:1.25rem 1.45rem;margin:0 0 1.1rem;
+  box-shadow:0 1px 0 rgba(23,27,36,.03),0 20px 40px -34px rgba(23,27,36,.5);
+  animation:lexIn .45s cubic-bezier(.22,1,.36,1) both;
+}
+.lex-find.alta{border-left-color:var(--accent);}
+.lex-find.media{border-left-color:var(--ochre);}
+.lex-find-head{display:flex;flex-wrap:wrap;gap:.7rem;align-items:baseline;margin-bottom:.7rem;}
+.lex-chip{
+  font-family:var(--display)!important;font-size:.58rem;font-weight:600;letter-spacing:.17em;
+  text-transform:uppercase;padding:.2rem .5rem;border-radius:2px;color:#FCFAF4;background:var(--ink-3);
+}
+.lex-chip.alta{background:var(--accent);}
+.lex-chip.media{background:var(--ochre);}
+.lex-find-t{font-family:var(--display)!important;font-size:1.06rem;color:var(--ink);letter-spacing:-.01em;}
+.lex-find-q{
+  font-family:var(--serif)!important;font-size:.95rem!important;font-style:italic;
+  color:var(--ink-3)!important;border-left:2px solid var(--rule);
+  padding:.35rem 0 .35rem .8rem;margin:.55rem 0 .75rem;
+}
+.lex-find p{font-family:var(--serif)!important;font-size:1.02rem!important;line-height:1.62;color:var(--ink-2)!important;margin:0 0 .55rem;}
+.lex-find .rec{color:var(--ink-2)!important;}
+.lex-find .rec b{font-family:var(--display)!important;color:var(--ink);font-weight:600;}
+.lex-find-src{
+  font-family:var(--display)!important;font-size:.63rem;font-weight:600;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--ink-3);border-top:1px solid var(--rule);
+  padding-top:.6rem;margin-top:.85rem;
+}
+.lex-ok{
+  font-family:var(--serif)!important;font-size:1.02rem;line-height:1.6;color:var(--ink-2);
+  background:rgba(23,27,36,.035);border-left:2px solid var(--ink-3);
+  padding:.9rem 1.1rem;border-radius:0 4px 4px 0;
+}
+
 /* ---------- movimiento ---------- */
 @keyframes lexUp{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:none;}}
 @keyframes lexIn{from{opacity:0;transform:translateY(9px);}to{opacity:1;transform:none;}}
@@ -227,3 +289,55 @@ def strip_html(documentos: int, fragmentos: int, motor: str) -> str:
 def warn_html(mensaje: str) -> str:
     """Aviso destacado (por ejemplo, base de datos vacía)."""
     return f'<p class="lex-warn">{mensaje}</p>'
+
+
+def note_html(mensaje: str) -> str:
+    """Nota discreta al margen."""
+    return f'<p class="lex-note">{mensaje}</p>'
+
+
+def _esc(texto: object) -> str:
+    """Escapa HTML para insertar texto del contrato o del modelo sin riesgo."""
+    from html import escape
+
+    return escape(str(texto or ""))
+
+
+def summary_html(clausulas: int, altas: int, total: int) -> str:
+    """Resumen del resultado de la revisión."""
+    return f"""
+<div class="lex-sum">
+  <div><span class="n">{clausulas}</span> <span class="l">Cláusulas revisadas</span></div>
+  <div><span class="n alta">{altas}</span> <span class="l">Gravedad alta</span></div>
+  <div><span class="n">{total}</span> <span class="l">Hallazgos</span></div>
+</div>
+"""
+
+
+def finding_html(hallazgo: dict) -> str:
+    """Tarjeta de un hallazgo, con filo y distintivo según su gravedad."""
+    g = str(hallazgo.get("gravedad", "baja")).lower()
+    partes = [
+        f'<div class="lex-find {g}">',
+        '<div class="lex-find-head">',
+        f'<span class="lex-chip {g}">{_esc(g)}</span>',
+        f'<span class="lex-find-t">{_esc(hallazgo.get("clausula"))}</span>',
+        "</div>",
+    ]
+    if hallazgo.get("cita"):
+        partes.append(f'<div class="lex-find-q">{_esc(hallazgo["cita"])}</div>')
+    partes.append(f'<p>{_esc(hallazgo.get("problema"))}</p>')
+    if hallazgo.get("recomendacion"):
+        partes.append(
+            f'<p class="rec"><b>Recomendación.</b> {_esc(hallazgo["recomendacion"])}</p>'
+        )
+    if hallazgo.get("fuentes"):
+        fuentes = " · ".join(_esc(f) for f in hallazgo["fuentes"])
+        partes.append(f'<div class="lex-find-src">{fuentes}</div>')
+    partes.append("</div>")
+    return "".join(partes)
+
+
+def ok_html(mensaje: str) -> str:
+    """Mensaje cuando la revisión no arrojó hallazgos."""
+    return f'<p class="lex-ok">{mensaje}</p>'

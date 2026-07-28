@@ -6,8 +6,9 @@ gradio>=4.44
 chromadb>=0.5.5
 sentence-transformers>=3.0
 
-# Extracción de texto de PDF
+# Extracción de texto de PDF y Word
 pypdf>=4.3
+python-docx>=1.1
 
 # Variables de entorno (.env)
 python-dotenv>=1.0

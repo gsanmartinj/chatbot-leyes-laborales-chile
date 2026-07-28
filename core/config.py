@@ -46,6 +46,14 @@ MIN_SCORE: float = float(os.getenv("MIN_SCORE", "0.30"))
 # Máximo de fragmentos a devolver cuando se consulta un artículo específico.
 MAX_ARTICLE_CHUNKS: int = int(os.getenv("MAX_ARTICLE_CHUNKS", "12"))
 
+# --- Revisión de contratos ---------------------------------------------------
+# Fragmentos de normativa que se recuperan por cada cláusula del contrato.
+CONTRACT_TOP_K: int = int(os.getenv("CONTRACT_TOP_K", "3"))
+# Tamaño objetivo de cada lote enviado al modelo (cláusulas + normativa).
+CONTRACT_BATCH_CHARS: int = int(os.getenv("CONTRACT_BATCH_CHARS", "6000"))
+# Tope de tamaño del contrato; más allá se trunca para no disparar el costo.
+MAX_CONTRACT_CHARS: int = int(os.getenv("MAX_CONTRACT_CHARS", "60000"))
+
 # --- Motor de redacción (opcional) ------------------------------------------
 # Si hay un proveedor configurado, las respuestas se redactan a partir de los
 # fragmentos recuperados localmente (RAG). Sin proveedor, la app funciona 100%

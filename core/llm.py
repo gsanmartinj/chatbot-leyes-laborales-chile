@@ -139,42 +139,45 @@ def _es_transitorio(exc: Exception) -> bool:
     return codigo is None and isinstance(exc, (OSError, TimeoutError))
 
 
+def _con_reintentos(operacion, intentos: int = 3):
+    """Ejecuta `operacion` reintentando ante fallos transitorios.
 
-@lru_cache(maxsize=1)
-def _openai_client():
-    from openai import OpenAI
-
-    return OpenAI(base_url=LLM_BASE_URL, api_key=LLM_API_KEY, timeout=90.0)
-
-
-def _generate_deepseek(question: str, hits: List[Dict[str, object]]) -> str:
-    # La pasarela devuelve 404/5xx de forma intermitente aunque el modelo exista,
-    # así que se reintenta antes de degradar al modo local.
-    intentos = 3
+    La pasarela devuelve 404/5xx de forma intermitente aunque el modelo exista,
+    así que conviene reintentar antes de degradar al modo local.
+    """
     for intento in range(1, intentos + 1):
         try:
-            response = _openai_client().chat.completions.create(
-                model=LLM_MODEL,
-                messages=[
-                    {"role": "system", "content": _SYSTEM_INSTRUCTION},
-                    {"role": "user", "content": _user_prompt(question, hits)},
-                ],
-                temperature=0.2,
-                max_tokens=900,
-            )
-            break
+            return operacion()
         except Exception as exc:  # noqa: BLE001
             if intento == intentos or not _es_transitorio(exc):
                 raise
             time.sleep(1.2 * intento)
 
+
+@lru_cache(maxsize=1)
+def _openai_client():
+    from openai import OpenAI
+
+    return OpenAI(base_url=LLM_BASE_URL, api_key=LLM_API_KEY, timeout=120.0)
+
+
+def _chat_deepseek(system: str, user: str, max_tokens: int, temperature: float) -> str:
+    response = _con_reintentos(
+        lambda: _openai_client().chat.completions.create(
+            model=LLM_MODEL,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+    )
     mensaje = response.choices[0].message
     texto = (mensaje.content or "").strip()
     if not texto:
         # Algunos modelos de razonamiento dejan el texto en otro campo.
         texto = (getattr(mensaje, "reasoning_content", "") or "").strip()
-    if not texto:
-        raise RuntimeError("El modelo devolvió una respuesta vacía.")
     return texto
 
 
@@ -186,18 +189,42 @@ def _gemini_client():
     return genai.Client(api_key=GEMINI_API_KEY)
 
 
-def _generate_gemini(question: str, hits: List[Dict[str, object]]) -> str:
+def _chat_gemini(system: str, user: str, max_tokens: int, temperature: float) -> str:
     from google.genai import types
 
-    response = _gemini_client().models.generate_content(
-        model=GEMINI_MODEL,
-        contents=_user_prompt(question, hits),
-        config=types.GenerateContentConfig(
-            system_instruction=_SYSTEM_INSTRUCTION,
-            temperature=0.2,
-        ),
+    response = _con_reintentos(
+        lambda: _gemini_client().models.generate_content(
+            model=GEMINI_MODEL,
+            contents=user,
+            config=types.GenerateContentConfig(
+                system_instruction=system,
+                temperature=temperature,
+                max_output_tokens=max_tokens,
+            ),
+        )
     )
-    texto = (response.text or "").strip()
+    return (response.text or "").strip()
+
+
+def chat(
+    system: str,
+    user: str,
+    max_tokens: int = 900,
+    temperature: float = 0.2,
+) -> str:
+    """Llamada genérica al modelo activo. Base de todas las funciones de IA.
+
+    Lanza una excepción si no hay proveedor, si la llamada falla tras los
+    reintentos, o si el modelo devuelve texto vacío.
+    """
+    provider = active_provider()
+    if provider == "deepseek":
+        texto = _chat_deepseek(system, user, max_tokens, temperature)
+    elif provider == "gemini":
+        texto = _chat_gemini(system, user, max_tokens, temperature)
+    else:
+        raise RuntimeError("No hay un modelo configurado.")
+
     if not texto:
         raise RuntimeError("El modelo devolvió una respuesta vacía.")
     return texto
@@ -209,13 +236,7 @@ def generate_answer(question: str, hits: List[Dict[str, object]]) -> str:
     Lanza una excepción si la llamada falla (el llamador decide el fallback a
     modo local).
     """
-    provider = active_provider()
-    if provider == "deepseek":
-        texto = _generate_deepseek(question, hits)
-    elif provider == "gemini":
-        texto = _generate_gemini(question, hits)
-    else:
-        raise RuntimeError("No hay un modelo de redacción configurado.")
+    texto = chat(_SYSTEM_INSTRUCTION, _user_prompt(question, hits))
     return f"{texto}\n\n{LEGAL_DISCLAIMER}"
 
 

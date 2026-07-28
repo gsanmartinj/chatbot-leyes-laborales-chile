@@ -80,8 +80,12 @@ def _chunk_text(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP)
     return chunks
 
 
-def _extract_pages(pdf_path: Path) -> List[str]:
-    """Extrae el texto de cada página del PDF (índice 0 = página 1)."""
+def extract_pages(pdf_path: str | Path) -> List[str]:
+    """Extrae el texto de cada página del PDF (índice 0 = página 1).
+
+    Público porque también lo usa la revisión de contratos (`core.contract`),
+    que lee un PDF sin indexarlo.
+    """
     from pypdf import PdfReader
 
     reader = PdfReader(str(pdf_path))
@@ -104,7 +108,7 @@ def ingest_pdf(pdf_path: str | Path, source_name: str | None = None) -> Dict[str
     # Si ya existía un documento con ese nombre, lo reemplazamos (re-indexación limpia).
     delete_document(source, remove_file=False)
 
-    pages = _extract_pages(pdf_path)
+    pages = extract_pages(pdf_path)
 
     documents: List[str] = []
     metadatas: List[Dict[str, object]] = []
