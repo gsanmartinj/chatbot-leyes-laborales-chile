@@ -12,39 +12,69 @@ No genera texto nuevo: solo recupera y presenta lo que está en los documentos.
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional
+import unicodedata
+from pathlib import Path
+from typing import Dict, List
 
+from .articles import detect_article
 from .config import LEGAL_DISCLAIMER, MAX_ARTICLE_CHUNKS, MIN_SCORE, TOP_K
 from .db import get_collection
 from .embeddings import embed_query
 
-_ORDINALS = {
-    "primero": 1, "segundo": 2, "tercero": 3, "cuarto": 4, "quinto": 5,
-    "sexto": 6, "septimo": 7, "séptimo": 7, "octavo": 8, "noveno": 9,
-    "decimo": 10, "décimo": 10, "undecimo": 11, "undécimo": 11,
-    "duodecimo": 12, "duodécimo": 12, "unico": 1, "único": 1,
-}
-
-# Detecta una referencia a artículo en la pregunta del usuario.
-_ART_QUERY_RE = re.compile(
-    r"\bart[íi]culo?s?\.?\s*(\d{1,4}|" + "|".join(_ORDINALS.keys()) + r")\b",
-    re.IGNORECASE,
-)
+# Reexportado: `detect_article` vivía aquí antes de mudarse a core.articles.
+__all__ = ["detect_article", "search", "answer", "format_answer"]
 
 
-def detect_article(question: str) -> Optional[int]:
-    """Devuelve el número de artículo mencionado en la pregunta, o None."""
-    m = _ART_QUERY_RE.search(question or "")
-    if not m:
-        return None
-    token = m.group(1).lower()
-    if token.isdigit():
-        return int(token)
-    return _ORDINALS.get(token)
+def _plegar(texto: str) -> str:
+    """Minúsculas, sin tildes y sin puntuación: para comparar nombres de documento."""
+    sin_tildes = "".join(
+        c for c in unicodedata.normalize("NFD", texto or "")
+        if unicodedata.category(c) != "Mn"
+    )
+    return re.sub(r"[^a-z0-9]+", " ", sin_tildes.lower()).strip()
 
 
-def _search_by_article(article: int) -> List[Dict[str, object]]:
-    """Recupera de forma exacta los fragmentos de un artículo, ordenados."""
+def _elegir_fuente(article: int, question: str, fuentes: List[str]) -> str:
+    """Decide de qué documento mostrar el artículo pedido.
+
+    Cada cuerpo legal del corpus tiene su propio "artículo 5", así que hay que
+    quedarse con uno. Primero se mira si la pregunta nombra el documento
+    ("art. 5 del Código del Trabajo"); si no, se deja que la base decida cuál de
+    las versiones de ese artículo se parece más a la pregunta.
+    """
+    if len(fuentes) == 1:
+        return fuentes[0]
+
+    # 1) ¿La pregunta nombra uno de los documentos indexados?
+    pregunta = _plegar(question)
+    nombrados = [f for f in fuentes if _plegar(Path(f).stem) in pregunta]
+    if len(nombrados) == 1:
+        return nombrados[0]
+    candidatas = nombrados or fuentes
+
+    # 2) Si no, el documento cuya versión del artículo es más afín a la pregunta.
+    #    Una sola consulta acotada al artículo: no hay que reembeber nada.
+    resultado = get_collection().query(
+        query_embeddings=[embed_query(question)],
+        n_results=1,
+        where={"articulo": article},
+        include=["metadatas"],
+    )
+    metas = (resultado.get("metadatas") or [[]])[0]
+    if metas:
+        mejor = str((metas[0] or {}).get("source", ""))
+        if mejor in candidatas:
+            return mejor
+    return sorted(candidatas)[0]
+
+
+def _search_by_article(article: int, question: str) -> List[Dict[str, object]]:
+    """Recupera los fragmentos de un artículo, acotados a un solo documento.
+
+    Devolver las coincidencias de todos los documentos mezclaba textos de leyes
+    distintas bajo una misma respuesta, y el recorte final por MAX_ARTICLE_CHUNKS
+    podía dejar fuera documentos enteros sin avisar.
+    """
     collection = get_collection()
     got = collection.get(
         where={"articulo": article}, include=["documents", "metadatas"]
@@ -52,22 +82,35 @@ def _search_by_article(article: int) -> List[Dict[str, object]]:
     docs = got.get("documents") or []
     metas = got.get("metadatas") or []
 
-    hits: List[Dict[str, object]] = []
+    # Agrupar por documento de origen.
+    por_fuente: Dict[str, List[Dict[str, object]]] = {}
     for text, meta in zip(docs, metas):
         meta = meta or {}
-        hits.append(
+        fuente = str(meta.get("source", "desconocido"))
+        por_fuente.setdefault(fuente, []).append(
             {
                 "texto": text,
-                "source": meta.get("source", "desconocido"),
+                "source": fuente,
                 "page": meta.get("page", "?"),
                 "articulo": meta.get("articulo"),
                 "seq": meta.get("seq", 0),
                 "score": 1.0,
             }
         )
+    if not por_fuente:
+        return []
+
+    elegida = _elegir_fuente(article, question, list(por_fuente))
     # Ordenar por su posición original en el documento.
-    hits.sort(key=lambda h: h.get("seq", 0))
-    return hits[:MAX_ARTICLE_CHUNKS]
+    hits = sorted(por_fuente[elegida], key=lambda h: h.get("seq", 0))
+    hits = hits[:MAX_ARTICLE_CHUNKS]
+
+    # Dejar constancia de los otros cuerpos legales que también tienen ese
+    # artículo, para que la respuesta pueda ofrecerlos en vez de ocultarlos.
+    otras = sorted(f for f in por_fuente if f != elegida)
+    if otras and hits:
+        hits[0]["otras_fuentes"] = otras
+    return hits
 
 
 def _search_semantic(question: str, top_k: int) -> List[Dict[str, object]]:
@@ -118,7 +161,7 @@ def search(question: str, top_k: int = TOP_K) -> List[Dict[str, object]]:
     # Modo 1: pregunta por un artículo específico -> filtro exacto.
     article = detect_article(question)
     if article is not None:
-        hits = _search_by_article(article)
+        hits = _search_by_article(article, question)
         if hits:
             return hits
         # Si no existe ese artículo indexado, caer a búsqueda semántica.
@@ -144,7 +187,8 @@ def answer(question: str, top_k: int = TOP_K) -> Dict[str, object]:
 
     if hits and llm_available():
         try:
-            return {"text": generate_answer(question, hits), "hits": hits, "mode": "llm"}
+            texto = generate_answer(question, hits) + otras_fuentes_md(hits)
+            return {"text": texto, "hits": hits, "mode": "llm"}
         except Exception as exc:  # noqa: BLE001 - ante cualquier fallo, caer a local
             texto = (
                 f"*No fue posible redactar la respuesta con el modelo ({exc}). "
@@ -171,5 +215,23 @@ def format_answer(hits: List[Dict[str, object]]) -> str:
             cita += f" · Art. {hit['articulo']}"
         partes.append(f"**{i}. {cita}**\n\n> {hit['texto']}\n")
 
+    partes.append(otras_fuentes_md(hits))
     partes.append("\n" + LEGAL_DISCLAIMER)
-    return "\n".join(partes)
+    return "\n".join(p for p in partes if p)
+
+
+def otras_fuentes_md(hits: List[Dict[str, object]]) -> str:
+    """Aviso de que el artículo consultado también existe en otros documentos.
+
+    La búsqueda por artículo se queda con un solo cuerpo legal; esto le dice a la
+    persona dónde más mirar, para que la elección no pase inadvertida.
+    """
+    otras = hits[0].get("otras_fuentes") if hits else None
+    if not otras:
+        return ""
+    articulo = hits[0].get("articulo")
+    return (
+        f"\nEse mismo artículo ({articulo}) también aparece en: "
+        + ", ".join(f"*{f}*" for f in otras)
+        + ". Nómbrelo en su pregunta si se refería a alguno de ellos.\n"
+    )
