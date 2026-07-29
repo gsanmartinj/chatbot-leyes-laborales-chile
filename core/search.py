@@ -45,9 +45,15 @@ def _elegir_fuente(article: int, question: str, fuentes: List[str]) -> str:
     if len(fuentes) == 1:
         return fuentes[0]
 
-    # 1) ¿La pregunta nombra uno de los documentos indexados?
+    # 1) ¿La pregunta nombra uno de los documentos indexados? Se exige que el
+    #    nombre calce como palabra completa: con `in` a secas, un documento
+    #    llamado "1.pdf" se daría por nombrado en "artículo 51".
     pregunta = _plegar(question)
-    nombrados = [f for f in fuentes if _plegar(Path(f).stem) in pregunta]
+    nombrados = [
+        f for f in fuentes
+        if (nombre := _plegar(Path(f).stem))
+        and re.search(rf"\b{re.escape(nombre)}\b", pregunta)
+    ]
     if len(nombrados) == 1:
         return nombrados[0]
     candidatas = nombrados or fuentes
@@ -144,8 +150,18 @@ def _search_semantic(question: str, top_k: int) -> List[Dict[str, object]]:
     return relevantes if relevantes else hits[:1]
 
 
-def search(question: str, top_k: int = TOP_K) -> List[Dict[str, object]]:
+def search(
+    question: str, top_k: int = TOP_K, modo_articulo: bool = True
+) -> List[Dict[str, object]]:
     """Busca los fragmentos más relevantes para la pregunta (modo híbrido).
+
+    Args:
+        question: texto de la consulta.
+        top_k: fragmentos a devolver en la búsqueda semántica.
+        modo_articulo: si es False, se salta el atajo por artículo y va siempre
+            por similitud. Lo usa la revisión de contratos: una cláusula es un
+            texto largo que puede citar un artículo de pasada, y quedarse solo
+            con ese artículo descartaría el resto de la normativa pertinente.
 
     Returns:
         lista de dicts {"texto", "source", "page", "articulo", "score"}.
@@ -159,7 +175,7 @@ def search(question: str, top_k: int = TOP_K) -> List[Dict[str, object]]:
         return []
 
     # Modo 1: pregunta por un artículo específico -> filtro exacto.
-    article = detect_article(question)
+    article = detect_article(question) if modo_articulo else None
     if article is not None:
         hits = _search_by_article(article, question)
         if hits:

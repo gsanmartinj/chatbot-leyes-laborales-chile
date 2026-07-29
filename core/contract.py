@@ -354,8 +354,10 @@ def review_contract(
         return {"hallazgos": [], "clausulas": 0, "avisos": ["El contrato está vacío."]}
 
     # Recuperación local (sin costo) de la normativa pertinente a cada cláusula.
+    # Siempre por similitud: la cláusula puede citar un artículo de pasada y el
+    # atajo por artículo devolvería solo ese, perdiendo el resto de la normativa.
     for i, c in enumerate(clausulas, start=1):
-        c.hits = search(c.texto, top_k=CONTRACT_TOP_K)
+        c.hits = search(c.texto, top_k=CONTRACT_TOP_K, modo_articulo=False)
         avisar(0.02 + 0.28 * i / len(clausulas), f"Buscando normativa ({i}/{len(clausulas)})…")
 
     lotes = _hacer_lotes(clausulas)
