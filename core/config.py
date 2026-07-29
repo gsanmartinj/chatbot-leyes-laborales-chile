@@ -72,8 +72,14 @@ GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
 # --- Administración ----------------------------------------------------------
-# Contraseña para el panel de Gradio. Cambiar en el archivo .env para producción.
-ADMIN_PASSWORD: str = os.getenv("ADMIN_PASSWORD", "cambia-esta-clave")
+# Credenciales del panel de Gradio. Cambiar en el archivo .env para producción.
+DEFAULT_ADMIN_PASSWORD: str = "cambia-esta-clave"
+ADMIN_USER: str = os.getenv("ADMIN_USER", "admin")
+ADMIN_PASSWORD: str = os.getenv("ADMIN_PASSWORD", DEFAULT_ADMIN_PASSWORD)
+
+# True mientras no se haya definido una contraseña propia. El panel lo avisa al
+# arrancar: con la clave de ejemplo no debe exponerse fuera de este equipo.
+ADMIN_PASSWORD_POR_DEFECTO: bool = ADMIN_PASSWORD == DEFAULT_ADMIN_PASSWORD
 
 # Aviso legal que se muestra en las respuestas.
 LEGAL_DISCLAIMER: str = (

@@ -70,8 +70,13 @@ copy .env.example .env          # Windows
 python app_gradio.py
 ```
 
-Abre la URL que aparece (por defecto http://127.0.0.1:7860), ingresa la contraseña,
-y en la pestaña **"Subir documentos"** selecciona uno o más PDF e **Indexar**.
+Abre la URL que aparece (por defecto http://127.0.0.1:7860). El navegador pedirá
+usuario y contraseña (`ADMIN_USER` / `ADMIN_PASSWORD` del `.env`; por defecto el
+usuario es `admin`). Una vez dentro, en la pestaña **"Cargar documentos"**
+selecciona uno o más PDF e **Indexar**.
+
+> La autenticación la aplica el propio servidor de Gradio: sin sesión válida no
+> se puede llamar a los endpoints de carga ni de borrado.
 
 ### 2) Consultar (chat, Streamlit)
 

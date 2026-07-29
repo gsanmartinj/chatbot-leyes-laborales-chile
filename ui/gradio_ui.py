@@ -57,16 +57,6 @@ footer{display:none!important;}
   background:var(--lex-panel)!important;border:1px solid var(--lex-line)!important;
   border-radius:5px!important;box-shadow:none!important;
 }
-#lex-login{max-width:430px;margin:1rem auto 3rem;padding:1.9rem 1.7rem;
-  background:var(--lex-panel)!important;border:1px solid var(--lex-line)!important;
-  border-top:2px solid var(--lex-accent)!important;border-radius:2px 2px 6px 6px!important;}
-/* Tras autenticarse Gradio vacía el grupo pero conserva el contenedor: sin esto
-   quedaría una tarjeta vacía flotando. Se colapsa si ya no tiene el campo. */
-#lex-login:not(:has(input)){display:none!important;}
-#lex-login .lex-lock{
-  font-family:var(--lex-display);font-size:.64rem;font-weight:600;letter-spacing:.22em;
-  text-transform:uppercase;color:var(--lex-dim);margin-bottom:1.1rem;text-align:center;
-}
 #lex-stats{
   font-family:var(--lex-display);border-top:1px solid var(--lex-line);
   border-bottom:1px solid var(--lex-line);padding:.8rem 0;margin:.4rem 0 1.4rem;
@@ -126,9 +116,8 @@ footer{display:none!important;}
 .gradio-container tbody td{background:var(--lex-panel)!important;color:var(--lex-paper)!important;border-color:var(--lex-line)!important;}
 
 /* ---------- mensajes de salida ---------- */
-#lex-msg-ingest,#lex-msg-delete,#lex-msg-login{font-family:var(--lex-serif);font-size:.98rem;line-height:1.6;}
+#lex-msg-ingest,#lex-msg-delete{font-family:var(--lex-serif);font-size:.98rem;line-height:1.6;}
 #lex-msg-ingest strong,#lex-msg-delete strong{color:#F3EFE2;}
-#lex-msg-login{color:var(--lex-accent);text-align:center;}
 
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;}}
 """

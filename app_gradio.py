@@ -1,8 +1,10 @@
 """Panel de administración (Gradio) — Gestión de la base de datos.
 
-Protegido con contraseña. Permite subir PDF (que alimentan la base vectorial
-compartida), listar los documentos indexados y eliminarlos. La app de chat
-(Streamlit) lee de la misma base.
+Protegido con la autenticación propia de Gradio: sin sesión válida el servidor
+no atiende ninguna llamada, ni siquiera a los endpoints de carga y borrado.
+Permite subir PDF (que alimentan la base vectorial compartida), listar los
+documentos indexados y eliminarlos. La app de chat (Streamlit) lee de la misma
+base.
 
 Ejecutar:
     python app_gradio.py
@@ -10,14 +12,31 @@ Ejecutar:
 
 from __future__ import annotations
 
+import secrets
 from pathlib import Path
 from typing import List
 
 import gradio as gr
 
-from core.config import ADMIN_PASSWORD
+from core.config import ADMIN_PASSWORD, ADMIN_PASSWORD_POR_DEFECTO, ADMIN_USER
 from core.ingest import delete_document, ingest_pdf, list_documents, stats
 from ui.gradio_ui import CSS, header_html, stats_html
+
+
+# --- Autenticación ------------------------------------------------------------
+def check_auth(username: str, password: str) -> bool:
+    """Valida las credenciales del panel.
+
+    Se entrega a `demo.launch(auth=...)`, que la aplica a nivel de servidor. El
+    login anterior solo alternaba la visibilidad de los bloques, de modo que
+    `do_ingest` y `do_delete` seguían siendo invocables sin contraseña por quien
+    llamara directamente a la API.
+
+    `compare_digest` evita filtrar la clave por el tiempo de comparación.
+    """
+    return secrets.compare_digest(username or "", ADMIN_USER) and secrets.compare_digest(
+        password or "", ADMIN_PASSWORD
+    )
 
 
 # --- Funciones auxiliares -----------------------------------------------------
@@ -46,19 +65,6 @@ def _refresh_outputs(mensaje: str):
 
 
 # --- Acciones -----------------------------------------------------------------
-def do_login(password: str):
-    """Valida la contraseña y muestra/oculta el panel."""
-    ok = password == ADMIN_PASSWORD
-    return (
-        gr.update(visible=not ok),          # bloque de login
-        gr.update(visible=ok),              # panel de administración
-        "" if ok else "Contraseña incorrecta.",
-        _stats(),
-        _docs_table(),
-        gr.update(choices=_doc_choices(), value=None),
-    )
-
-
 def do_ingest(files: List[str] | None):
     """Indexa los PDF subidos."""
     if not files:
@@ -104,50 +110,36 @@ def do_refresh():
 with gr.Blocks(title="Administración · Base Documental") as demo:
     gr.HTML(header_html())
 
-    # Bloque de login (visible al inicio).
-    with gr.Group(visible=True, elem_id="lex-login") as login_box:
-        gr.HTML('<div class="lex-lock">Acceso restringido</div>')
-        password_in = gr.Textbox(
-            label="Contraseña", type="password", placeholder="••••••••"
+    stats_md = gr.HTML()
+
+    with gr.Tab("Cargar documentos"):
+        files_in = gr.File(
+            label="Archivos PDF",
+            file_count="multiple",
+            file_types=[".pdf"],
+            type="filepath",
         )
-        login_btn = gr.Button("Ingresar", variant="primary")
-        login_error = gr.Markdown("", elem_id="lex-msg-login")
+        ingest_btn = gr.Button("Indexar en la base de datos", variant="primary")
+        ingest_out = gr.Markdown(elem_id="lex-msg-ingest")
 
-    # Panel de administración (oculto hasta autenticarse).
-    with gr.Column(visible=False) as admin_box:
-        stats_md = gr.HTML()
-
-        with gr.Tab("Cargar documentos"):
-            files_in = gr.File(
-                label="Archivos PDF",
-                file_count="multiple",
-                file_types=[".pdf"],
-                type="filepath",
+    with gr.Tab("Documentos indexados"):
+        docs_table = gr.Dataframe(
+            headers=["Documento", "Fragmentos"],
+            datatype=["str", "number"],
+            interactive=False,
+            label="Contenido de la base",
+        )
+        with gr.Row():
+            delete_dropdown = gr.Dropdown(
+                label="Documento a eliminar", choices=[], value=None, scale=3
             )
-            ingest_btn = gr.Button("Indexar en la base de datos", variant="primary")
-            ingest_out = gr.Markdown(elem_id="lex-msg-ingest")
-
-        with gr.Tab("Documentos indexados"):
-            docs_table = gr.Dataframe(
-                headers=["Documento", "Fragmentos"],
-                datatype=["str", "number"],
-                interactive=False,
-                label="Contenido de la base",
-            )
-            with gr.Row():
-                delete_dropdown = gr.Dropdown(
-                    label="Documento a eliminar", choices=[], value=None, scale=3
-                )
-                delete_btn = gr.Button("Eliminar", variant="stop", scale=1)
-            refresh_btn = gr.Button("Refrescar", variant="secondary")
-            delete_out = gr.Markdown(elem_id="lex-msg-delete")
+            delete_btn = gr.Button("Eliminar", variant="stop", scale=1)
+        refresh_btn = gr.Button("Refrescar", variant="secondary")
+        delete_out = gr.Markdown(elem_id="lex-msg-delete")
 
     # --- Eventos --------------------------------------------------------------
-    login_outputs = [
-        login_box, admin_box, login_error, stats_md, docs_table, delete_dropdown
-    ]
-    login_btn.click(do_login, inputs=[password_in], outputs=login_outputs)
-    password_in.submit(do_login, inputs=[password_in], outputs=login_outputs)
+    # El estado se carga al abrir la página; a ella solo se llega autenticado.
+    demo.load(do_refresh, inputs=[], outputs=[stats_md, docs_table, delete_dropdown])
 
     ingest_btn.click(
         do_ingest,
@@ -165,5 +157,16 @@ with gr.Blocks(title="Administración · Base Documental") as demo:
 
 
 if __name__ == "__main__":
+    if ADMIN_PASSWORD_POR_DEFECTO:
+        print(
+            "\n  AVISO: ADMIN_PASSWORD sigue siendo la clave de ejemplo.\n"
+            "  Copie .env.example a .env y cambie el valor antes de abrir este\n"
+            "  panel fuera de este equipo.\n"
+        )
+
     # En Gradio 6 el CSS se entrega en launch(), no en el constructor de Blocks.
-    demo.launch(css=CSS)
+    demo.launch(
+        css=CSS,
+        auth=check_auth,
+        auth_message="Panel reservado a la administración de la base documental.",
+    )
