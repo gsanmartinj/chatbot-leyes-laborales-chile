@@ -12,34 +12,10 @@ import shutil
 from pathlib import Path
 from typing import Dict, List
 
+from .articles import ARTICLE_RE, article_number
 from .config import CHUNK_OVERLAP, CHUNK_SIZE, PDF_DIR
 from .db import get_collection
 from .embeddings import embed_texts
-
-
-# Palabras ordinales usadas en la numeración de artículos ("Artículo primero").
-_ORDINALS = {
-    "primero": 1, "segundo": 2, "tercero": 3, "cuarto": 4, "quinto": 5,
-    "sexto": 6, "septimo": 7, "séptimo": 7, "octavo": 8, "noveno": 9,
-    "decimo": 10, "décimo": 10, "undecimo": 11, "undécimo": 11,
-    "duodecimo": 12, "duodécimo": 12, "unico": 1, "único": 1,
-}
-
-# Detecta encabezados de artículo: "Artículo 1", "Art. 12", "Artículo primero".
-_ART_RE = re.compile(
-    r"\bart[íi]culo?s?\.?\s+(\d{1,4}|"
-    + "|".join(_ORDINALS.keys())
-    + r")\b",
-    re.IGNORECASE,
-)
-
-
-def _article_number(token: str) -> int | None:
-    """Convierte el token capturado ('12' o 'primero') a un número de artículo."""
-    token = token.lower()
-    if token.isdigit():
-        return int(token)
-    return _ORDINALS.get(token)
 
 
 def _clean(text: str) -> str:
@@ -120,39 +96,40 @@ def ingest_pdf(pdf_path: str | Path, source_name: str | None = None) -> Dict[str
     for page_num, page_text in enumerate(pages, start=1):
         # Posiciones y números de los encabezados de artículo en esta página.
         markers = [
-            (m.start(), _article_number(m.group(1)))
-            for m in _ART_RE.finditer(page_text)
+            (m.start(), article_number(m.group(1)))
+            for m in ARTICLE_RE.finditer(page_text)
         ]
         markers = [(pos, num) for pos, num in markers if num is not None]
 
-        cursor = 0
-        for chunk_idx, chunk in enumerate(_chunk_text(page_text)):
-            # Localizar el fragmento dentro de la página para saber su artículo.
-            idx = page_text.find(chunk, cursor)
-            start = idx if idx != -1 else cursor
-            cursor = start + len(chunk)
+        # Cortar la página en tramos, uno por artículo, antes de trocear. Así cada
+        # fragmento cae dentro de un solo artículo. Trocear la página entera y
+        # luego preguntar "¿qué artículo estaba activo donde empieza este
+        # fragmento?" perdía todos los artículos que empezaban dentro de él: con
+        # CHUNK_SIZE=800 un fragmento abarca varios y solo se quedaba con uno.
+        tramos: List[tuple[int | None, str]] = []
+        # Lo que precede al primer encabezado continúa el artículo de la página
+        # anterior (o no pertenece a ninguno, si aún no ha aparecido).
+        primero = markers[0][0] if markers else len(page_text)
+        if primero > 0:
+            tramos.append((current_article, page_text[:primero]))
+        for i, (pos, num) in enumerate(markers):
+            fin = markers[i + 1][0] if i + 1 < len(markers) else len(page_text)
+            tramos.append((num, page_text[pos:fin]))
 
-            # Artículo activo al inicio del fragmento (arrastrando el anterior).
-            article = current_article
-            for pos, num in markers:
-                if pos <= start:
-                    article = num
-                else:
-                    break
+        chunk_idx = 0
+        for article, tramo in tramos:
+            for chunk in _chunk_text(tramo):
+                meta: Dict[str, object] = {
+                    "source": source, "page": page_num, "seq": seq
+                }
+                if article is not None:
+                    meta["articulo"] = article
 
-            meta: Dict[str, object] = {"source": source, "page": page_num, "seq": seq}
-            if article is not None:
-                meta["articulo"] = article
-
-            documents.append(chunk)
-            metadatas.append(meta)
-            ids.append(f"{source}::p{page_num}::c{chunk_idx}")
-            seq += 1
-
-            # Arrastrar el último artículo que aparece dentro de este fragmento.
-            for pos, num in markers:
-                if pos < cursor:
-                    current_article = num
+                documents.append(chunk)
+                metadatas.append(meta)
+                ids.append(f"{source}::p{page_num}::c{chunk_idx}")
+                seq += 1
+                chunk_idx += 1
 
         if markers:
             current_article = markers[-1][1]
