@@ -267,6 +267,47 @@ def _indice_fragmento(bruto: Dict) -> Optional[int]:
     return int(match.group()) if match else None
 
 
+def _resolver_por_texto(
+    bruto: Dict, fragmentos: Dict[int, Dict[str, object]]
+) -> Optional[Dict[str, object]]:
+    """Respaldo: identifica el fragmento a partir de la referencia en texto.
+
+    Si el modelo no devuelve el número de fragmento (por ejemplo porque redacta
+    "fuentes" como en el formato anterior), se intenta emparejar su texto con las
+    referencias de los fragmentos que sí se le entregaron. Sigue siendo estricto:
+    los candidatos son solo esos fragmentos, así que no hay forma de colar una
+    fuente inventada. Sin este respaldo, un modelo que ignorase el campo dejaría
+    la revisión entera en cero hallazgos.
+    """
+    partes = bruto.get("fuentes") or []
+    if isinstance(partes, str):
+        partes = [partes]
+    texto = " ".join(str(p) for p in partes).lower()
+    if not texto.strip():
+        return None
+
+    # Se exige que coincidan documento, página y —si el fragmento lo tiene—
+    # artículo. Con el nombre a secas no basta: un documento llamado "ley.pdf"
+    # convertiria cualquier frase que contenga "ley" en una fuente valida, que es
+    # el agujero que este cambio venia a cerrar.
+    paginas = re.findall(r"p[áa]g\.?\s*(\d+)", texto)
+    articulos = re.findall(r"\bart[íi]?c?u?l?o?s?\.?\s*(\d+)", texto)
+    if not paginas:
+        return None
+
+    for hit in fragmentos.values():
+        nombre = os.path.splitext(str(hit.get("source", "")))[0].lower()
+        if not nombre or not re.search(rf"\b{re.escape(nombre)}\b", texto):
+            continue
+        if str(hit.get("page")) not in paginas:
+            continue
+        articulo = hit.get("articulo")
+        if articulo is not None and str(articulo) not in articulos:
+            continue
+        return hit
+    return None
+
+
 def _normalizar_hallazgo(
     bruto: Dict, fragmentos: Dict[int, Dict[str, object]]
 ) -> Optional[Dict[str, object]]:
@@ -285,9 +326,11 @@ def _normalizar_hallazgo(
         return None
 
     indice = _indice_fragmento(bruto)
-    if indice is None or indice not in fragmentos:
+    hit = fragmentos.get(indice) if indice is not None else None
+    if hit is None:
+        hit = _resolver_por_texto(bruto, fragmentos)
+    if hit is None:
         return None
-    hit = fragmentos[indice]
 
     gravedad = str(bruto.get("gravedad", "media")).strip().lower()
     if gravedad not in ("alta", "media", "baja"):
