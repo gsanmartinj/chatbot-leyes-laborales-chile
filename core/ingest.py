@@ -10,10 +10,10 @@ from __future__ import annotations
 import re
 import shutil
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, Iterable, List
 
 from .articles import DETECTOR_VERSION, find_headings
-from .config import CHUNK_OVERLAP, CHUNK_SIZE, PDF_DIR
+from .config import CHROMA_DIR, CHUNK_OVERLAP, CHUNK_SIZE, PDF_DIR
 from .db import get_collection
 from .embeddings import embed_texts
 
@@ -170,21 +170,16 @@ def ingest_pdf(pdf_path: str | Path, source_name: str | None = None) -> Dict[str
             embeddings=embed_texts(docs_b),
         )
 
+    # La huella de los archivos ya delata el cambio; esto solo evita depender
+    # de ella dentro del proceso que acaba de escribir.
+    _invalidar_cache()
     return {"chunks": len(documents), "pages": len(pages)}
 
 
-def list_documents() -> List[Dict[str, object]]:
-    """Lista los documentos indexados con su número de fragmentos y su estado.
-
-    Returns:
-        lista de dicts {"source": nombre, "chunks": n, "actualizado": bool}
-        ordenada por nombre. `actualizado` es False si el documento se indexó
-        con una versión anterior del detector de artículos.
-    """
-    collection = get_collection()
-    got = collection.get(include=["metadatas"])
+def _resumir(metadatas: Iterable[Dict[str, object] | None]) -> List[Dict[str, object]]:
+    """Agrupa los metadatos por documento. Función pura: se prueba sin base."""
     info: Dict[str, Dict[str, object]] = {}
-    for meta in got.get("metadatas") or []:
+    for meta in metadatas or []:
         meta = meta or {}
         src = str(meta.get("source", "desconocido"))
         datos = info.setdefault(src, {"chunks": 0, "actualizado": True})
@@ -196,6 +191,61 @@ def list_documents() -> List[Dict[str, object]]:
          "actualizado": info[src]["actualizado"]}
         for src in sorted(info)
     ]
+
+
+# Resumen cacheado, junto a la huella de la base con la que se calculó.
+_RESUMEN: tuple[object, List[Dict[str, object]]] | None = None
+
+
+def _huella_base() -> tuple:
+    """Señal barata de que la base cambió, válida **entre procesos**.
+
+    Un caché que solo se invalidara al escribir no serviría: el chat y el panel
+    corren en procesos distintos, así que el chat seguiría mostrando el estado
+    anterior a lo que el panel acaba de subir, y el README promete lo contrario.
+    El reloj y el tamaño de los archivos de SQLite sí cruzan de un proceso a
+    otro y cuestan dos `stat`, frente a materializar la metadata entera.
+    """
+    marcas = []
+    for f in sorted(CHROMA_DIR.glob("chroma.sqlite3*")):   # incluye -wal y -shm
+        try:
+            st = f.stat()
+            marcas.append((f.name, st.st_mtime_ns, st.st_size))
+        except OSError:
+            continue
+    return tuple(marcas)
+
+
+def _invalidar_cache() -> None:
+    """Descarta el resumen cacheado tras escribir en la base."""
+    global _RESUMEN
+    _RESUMEN = None
+
+
+def list_documents() -> List[Dict[str, object]]:
+    """Lista los documentos indexados con su número de fragmentos y su estado.
+
+    El resultado se cachea mientras la base no cambie. Hace falta porque cada
+    render pide esto varias veces —el panel cuatro (estado, tabla, desplegable
+    y aviso) y el chat dos—, y cada llamada traía a memoria la metadata de
+    todos los fragmentos del corpus para no usar más que el nombre del
+    documento. Con el Código del Trabajo cargado eso son miles de diccionarios
+    por pulsación.
+
+    Returns:
+        lista de dicts {"source": nombre, "chunks": n, "actualizado": bool}
+        ordenada por nombre. `actualizado` es False si el documento se indexó
+        con una versión anterior del detector de artículos.
+    """
+    global _RESUMEN
+    huella = _huella_base()
+    if _RESUMEN is None or _RESUMEN[0] != huella:
+        got = get_collection().get(include=["metadatas"])
+        _RESUMEN = (huella, _resumir(got.get("metadatas") or []))
+
+    # Copia: quien reciba esto no debe poder corromper el caché. Cuesta una
+    # entrada por documento, no por fragmento, que es lo que se quería evitar.
+    return [dict(d) for d in _RESUMEN[1]]
 
 
 def stale_documents() -> List[str]:
@@ -238,6 +288,7 @@ def delete_document(source: str, remove_file: bool = True) -> None:
     """Elimina de la base todos los fragmentos de un documento y (opcional) su PDF."""
     collection = get_collection()
     collection.delete(where={"source": source})
+    _invalidar_cache()
     if remove_file:
         pdf_file = PDF_DIR / source
         if pdf_file.exists():
