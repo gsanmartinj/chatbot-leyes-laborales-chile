@@ -12,7 +12,7 @@ import shutil
 from pathlib import Path
 from typing import Dict, List
 
-from .articles import ARTICLE_RE, article_number
+from .articles import find_headings
 from .config import CHUNK_OVERLAP, CHUNK_SIZE, PDF_DIR
 from .db import get_collection
 from .embeddings import embed_texts
@@ -81,8 +81,14 @@ def ingest_pdf(pdf_path: str | Path, source_name: str | None = None) -> Dict[str
     pdf_path = Path(pdf_path)
     source = source_name or pdf_path.name
 
-    # Si ya existía un documento con ese nombre, lo reemplazamos (re-indexación limpia).
-    delete_document(source, remove_file=False)
+    # `source` termina como nombre de fichero en data/pdfs/ y como clave de
+    # borrado, así que no puede contener rutas: "../../x.pdf" escribiría (y luego
+    # borraría) fuera de la carpeta de datos.
+    if source in ("", ".", "..") or source != Path(source).name:
+        raise ValueError(
+            f"Nombre de documento no válido: {source!r}. "
+            "Debe ser un nombre de archivo, sin carpetas."
+        )
 
     pages = extract_pages(pdf_path)
 
@@ -95,11 +101,9 @@ def ingest_pdf(pdf_path: str | Path, source_name: str | None = None) -> Dict[str
 
     for page_num, page_text in enumerate(pages, start=1):
         # Posiciones y números de los encabezados de artículo en esta página.
-        markers = [
-            (m.start(), article_number(m.group(1)))
-            for m in ARTICLE_RE.finditer(page_text)
-        ]
-        markers = [(pos, num) for pos, num in markers if num is not None]
+        # `find_headings` descarta las remisiones a otros artículos ("conforme a
+        # los arts. 22 y 23"), que no abren artículo y partirían el texto.
+        markers = list(find_headings(page_text))
 
         # Cortar la página en tramos, uno por artículo, antes de trocear. Así cada
         # fragmento cae dentro de un solo artículo. Trocear la página entera y
@@ -139,6 +143,11 @@ def ingest_pdf(pdf_path: str | Path, source_name: str | None = None) -> Dict[str
             "No se pudo extraer texto de este PDF. "
             "Puede ser un documento escaneado (imagen) sin texto seleccionable."
         )
+
+    # El reemplazo de la versión anterior se hace aquí y no al principio: si el
+    # PDF nuevo no tiene texto extraíble, la excepción de arriba salta antes de
+    # borrar nada y el documento que ya estaba indexado sobrevive intacto.
+    delete_document(source, remove_file=False)
 
     # Guardar una copia del PDF original en data/pdfs/.
     dest = PDF_DIR / source
