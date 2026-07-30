@@ -286,14 +286,19 @@ def strip_html(documentos: int, fragmentos: int, motor: str) -> str:
 """
 
 
-def warn_html(mensaje: str) -> str:
-    """Aviso destacado (por ejemplo, base de datos vacía)."""
-    return f'<p class="lex-warn">{mensaje}</p>'
+def warn_html(mensaje: str, escapar: bool = False) -> str:
+    """Aviso destacado (por ejemplo, base de datos vacía).
+
+    Con `escapar=True` el mensaje se trata como texto y no como HTML. Los textos
+    fijos de la app llevan etiquetas a propósito (`<b>`, `<code>`), así que el
+    escapado no puede ser el comportamiento por omisión.
+    """
+    return f'<p class="lex-warn">{_esc(mensaje) if escapar else mensaje}</p>'
 
 
-def note_html(mensaje: str) -> str:
-    """Nota discreta al margen."""
-    return f'<p class="lex-note">{mensaje}</p>'
+def note_html(mensaje: str, escapar: bool = False) -> str:
+    """Nota discreta al margen. Ver `warn_html` sobre `escapar`."""
+    return f'<p class="lex-note">{_esc(mensaje) if escapar else mensaje}</p>'
 
 
 def _esc(texto: object) -> str:

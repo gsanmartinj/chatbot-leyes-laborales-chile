@@ -224,8 +224,10 @@ with tab_contrato:
                 unsafe_allow_html=True,
             )
 
+            # escapar=True: los avisos pueden llevar el texto de una excepción del
+            # proveedor, que no es contenido de confianza.
             for aviso in res.get("avisos", []):
-                st.markdown(note_html(aviso), unsafe_allow_html=True)
+                st.markdown(note_html(aviso, escapar=True), unsafe_allow_html=True)
 
             if hallazgos:
                 for h in hallazgos:
