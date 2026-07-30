@@ -1,6 +1,8 @@
 # Interfaces web
 streamlit>=1.36
-gradio>=4.44
+# Gradio 6 o superior: el panel entrega el CSS en `launch()`, que en las series
+# 4 y 5 no acepta ese argumento y aborta el arranque.
+gradio>=6.0
 
 # Base vectorial y embeddings locales
 chromadb>=0.5.5

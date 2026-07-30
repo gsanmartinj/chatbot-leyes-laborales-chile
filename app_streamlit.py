@@ -16,7 +16,7 @@ import streamlit as st
 
 from core.config import LEGAL_DISCLAIMER
 from core.contract import extract_text, report_markdown, review_contract
-from core.ingest import stats
+from core.ingest import stale_documents, stats
 from core.llm import llm_available, provider_label
 from core.search import answer
 from ui.streamlit_ui import (
@@ -81,6 +81,21 @@ if base["documentos"] == 0:
         warn_html(
             "La base de datos está vacía. Solicite al administrador que cargue "
             "los documentos desde el panel de administración antes de consultar."
+        ),
+        unsafe_allow_html=True,
+    )
+
+# Índice construido con reglas de etiquetado anteriores: las respuestas por
+# artículo pueden citar mal. Se avisa aquí, no solo en el panel, porque quien
+# consulta no tiene otra forma de saberlo.
+desactualizados = stale_documents()
+if desactualizados:
+    st.markdown(
+        warn_html(
+            f"{len(desactualizados)} documento(s) se indexaron con una versión "
+            "anterior del detector de artículos, por lo que las citas por "
+            "artículo pueden ser incorrectas. Pida al administrador que los "
+            "reindexe desde el panel."
         ),
         unsafe_allow_html=True,
     )
@@ -150,6 +165,20 @@ with tab_contrato:
         ),
         unsafe_allow_html=True,
     )
+
+    # La nota de arriba dice la verdad sobre el almacenamiento, pero callaba lo
+    # que más importa aquí: el texto sale del equipo. Un contrato lleva nombre,
+    # RUT y remuneración, así que la advertencia va antes de subir el archivo.
+    if usa_llm:
+        st.markdown(
+            warn_html(
+                f"<b>El texto completo del contrato se envía a {motor}</b> para "
+                "su análisis, incluidos los datos personales que contenga "
+                "(nombre, RUT, remuneración). Si prefiere evitarlo, anonimice "
+                "esos datos antes de subirlo."
+            ),
+            unsafe_allow_html=True,
+        )
 
     if not usa_llm:
         st.markdown(

@@ -119,6 +119,15 @@ footer{display:none!important;}
 #lex-msg-ingest,#lex-msg-delete{font-family:var(--lex-serif);font-size:.98rem;line-height:1.6;}
 #lex-msg-ingest strong,#lex-msg-delete strong{color:#F3EFE2;}
 
+/* Aviso de documentos etiquetados con reglas anteriores. */
+#lex-msg-stale{
+  font-family:var(--lex-serif);font-size:.95rem;line-height:1.6;
+  border-left:2px solid var(--lex-ochre);background:rgba(200,155,60,.09);
+  padding:.05rem 1rem;border-radius:0 4px 4px 0;margin-bottom:1.2rem;
+}
+#lex-msg-stale:empty{display:none;}
+#lex-msg-stale strong{color:#F3EFE2;}
+
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;}}
 """
 

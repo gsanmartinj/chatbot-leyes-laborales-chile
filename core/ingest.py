@@ -12,7 +12,7 @@ import shutil
 from pathlib import Path
 from typing import Dict, List
 
-from .articles import find_headings
+from .articles import DETECTOR_VERSION, find_headings
 from .config import CHUNK_OVERLAP, CHUNK_SIZE, PDF_DIR
 from .db import get_collection
 from .embeddings import embed_texts
@@ -96,7 +96,7 @@ def ingest_pdf(pdf_path: str | Path, source_name: str | None = None) -> Dict[str
     metadatas: List[Dict[str, object]] = []
     ids: List[str] = []
 
-    current_article: int | None = None  # último artículo visto (se arrastra entre páginas)
+    current_article: str | None = None  # última etiqueta vista (se arrastra entre páginas)
     seq = 0                              # orden global del fragmento (para reordenar luego)
 
     for page_num, page_text in enumerate(pages, start=1):
@@ -110,21 +110,25 @@ def ingest_pdf(pdf_path: str | Path, source_name: str | None = None) -> Dict[str
         # luego preguntar "¿qué artículo estaba activo donde empieza este
         # fragmento?" perdía todos los artículos que empezaban dentro de él: con
         # CHUNK_SIZE=800 un fragmento abarca varios y solo se quedaba con uno.
-        tramos: List[tuple[int | None, str]] = []
+        tramos: List[tuple[str | None, str]] = []
         # Lo que precede al primer encabezado continúa el artículo de la página
         # anterior (o no pertenece a ninguno, si aún no ha aparecido).
         primero = markers[0][0] if markers else len(page_text)
         if primero > 0:
             tramos.append((current_article, page_text[:primero]))
-        for i, (pos, num) in enumerate(markers):
+        for i, (pos, etiqueta) in enumerate(markers):
             fin = markers[i + 1][0] if i + 1 < len(markers) else len(page_text)
-            tramos.append((num, page_text[pos:fin]))
+            tramos.append((etiqueta, page_text[pos:fin]))
 
         chunk_idx = 0
         for article, tramo in tramos:
             for chunk in _chunk_text(tramo):
+                # `dv` deja constancia de con qué reglas se etiquetó esto: si el
+                # detector cambia, `stale_documents()` lo delata en vez de dejar
+                # la base respondiendo con etiquetas que ya nadie sabe reproducir.
                 meta: Dict[str, object] = {
-                    "source": source, "page": page_num, "seq": seq
+                    "source": source, "page": page_num, "seq": seq,
+                    "dv": DETECTOR_VERSION,
                 }
                 if article is not None:
                     meta["articulo"] = article
@@ -170,20 +174,64 @@ def ingest_pdf(pdf_path: str | Path, source_name: str | None = None) -> Dict[str
 
 
 def list_documents() -> List[Dict[str, object]]:
-    """Lista los documentos indexados con su número de fragmentos.
+    """Lista los documentos indexados con su número de fragmentos y su estado.
 
     Returns:
-        lista de dicts {"source": nombre, "chunks": n} ordenada por nombre.
+        lista de dicts {"source": nombre, "chunks": n, "actualizado": bool}
+        ordenada por nombre. `actualizado` es False si el documento se indexó
+        con una versión anterior del detector de artículos.
     """
     collection = get_collection()
     got = collection.get(include=["metadatas"])
-    counts: Dict[str, int] = {}
+    info: Dict[str, Dict[str, object]] = {}
     for meta in got.get("metadatas") or []:
+        meta = meta or {}
         src = str(meta.get("source", "desconocido"))
-        counts[src] = counts.get(src, 0) + 1
+        datos = info.setdefault(src, {"chunks": 0, "actualizado": True})
+        datos["chunks"] = int(datos["chunks"]) + 1
+        if meta.get("dv") != DETECTOR_VERSION:
+            datos["actualizado"] = False
     return [
-        {"source": src, "chunks": counts[src]} for src in sorted(counts)
+        {"source": src, "chunks": info[src]["chunks"],
+         "actualizado": info[src]["actualizado"]}
+        for src in sorted(info)
     ]
+
+
+def stale_documents() -> List[str]:
+    """Documentos indexados con reglas de detección anteriores a las vigentes.
+
+    Sus etiquetas de artículo no se corresponden con lo que el código produce
+    hoy, así que la búsqueda por artículo responde sobre datos obsoletos hasta
+    que se reindexen.
+    """
+    return [str(d["source"]) for d in list_documents() if not d["actualizado"]]
+
+
+def reindex(sources: List[str] | None = None) -> List[str]:
+    """Vuelve a indexar documentos desde la copia guardada en data/pdfs/.
+
+    Args:
+        sources: documentos a reprocesar. Por defecto, los desactualizados.
+
+    Returns:
+        una línea de resultado por documento, para mostrar en la interfaz.
+    """
+    objetivos = stale_documents() if sources is None else sources
+    mensajes: List[str] = []
+    for src in objetivos:
+        pdf = PDF_DIR / src
+        if not pdf.exists():
+            mensajes.append(
+                f"**{src}** — no se conserva el PDF original; vuelva a subirlo."
+            )
+            continue
+        try:
+            res = ingest_pdf(pdf, source_name=src)
+            mensajes.append(f"**{src}** — reindexado: {res['chunks']} fragmento(s).")
+        except Exception as exc:  # noqa: BLE001
+            mensajes.append(f"**{src}** — error al reindexar: {exc}")
+    return mensajes
 
 
 def delete_document(source: str, remove_file: bool = True) -> None:

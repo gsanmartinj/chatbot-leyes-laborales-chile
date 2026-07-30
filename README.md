@@ -5,9 +5,14 @@ Asistente web para consultar sobre **derecho laboral chileno**. Funciona con una
 leyes, dictámenes, etc.). El asistente responde recuperando los fragmentos más
 relevantes de esos documentos y **cita la fuente** (archivo y página).
 
-- ✅ **100 % local y privado** — no usa la API de Claude ni ningún servicio en la nube.
-- ✅ **Sin alucinaciones** — solo muestra texto que está en los documentos oficiales.
-- ✅ **Sin costo por consulta.**
+- ✅ **Respuestas ancladas al corpus** — solo se responde con lo que está en los PDF
+  cargados, y cada respuesta cita archivo, página y artículo.
+- ✅ **Funciona sin conexión** — la búsqueda (embeddings + ChromaDB) corre entera en
+  este equipo, sin costo por consulta.
+- ⚠️ **La redacción es opcional y sí sale del equipo.** Si configuras un proveedor
+  (DeepSeek o Gemini), tu pregunta y los fragmentos recuperados se envían a sus
+  servidores. Sin proveedor configurado, nada sale del equipo. Ver
+  [Respuestas redactadas por un modelo](#opcional-respuestas-redactadas-por-un-modelo).
 
 ## Arquitectura
 
@@ -26,14 +31,48 @@ Bajo el capó:
 - Al preguntar, la consulta se vectoriza y se recuperan los fragmentos más cercanos.
 
 ```
-core/             # lógica: config, db, embeddings, ingesta, búsqueda, Gemini
+core/             # lógica: config, db, embeddings, artículos, ingesta, búsqueda, LLM
 ui/               # capa visual: CSS y componentes de cada app
+tests/            # pruebas del detector de artículos y de la revisión
 app_streamlit.py  # chat (usuarios)
 app_gradio.py     # panel admin (subir PDF)
 .streamlit/       # tema base de Streamlit
 data/pdfs/        # copia de los PDF cargados
 data/chroma/      # base vectorial persistente
 ```
+
+### Cómo se identifican los artículos
+
+`core/articles.py` etiqueta cada fragmento con el artículo al que pertenece; es lo
+que permite responder «¿qué dice el artículo 22?» con una cita exacta en vez de
+una aproximación semántica. El texto legal chileno impone tres distinciones que
+ese módulo trata explícitamente:
+
+- **Encabezado vs. remisión.** «Art. 5. … conforme a los arts. 22 y 23» contiene
+  un solo artículo, el 5.
+- **El salto de línea de un PDF no cierra la frase.** El PDF corta los renglones a
+  mitad de oración, así que una remisión puede quedar abriendo renglón sin abrir
+  artículo. Se mira cómo termina la línea anterior, no solo el carácter previo.
+- **`157`, `157 bis` y `157 quinquies` son artículos distintos.** La etiqueta es
+  `"157 bis"`, no `157`: colapsarlos mezcla textos ajenos bajo una misma cita.
+  También se aceptan las dos formas del ordinal, `1º` y `1°`, que son caracteres
+  Unicode distintos.
+
+`DETECTOR_VERSION` en ese módulo se guarda con cada fragmento. Si las reglas
+cambian, los documentos indexados con la versión anterior aparecen marcados como
+desactualizados y ambas apps lo avisan: sus etiquetas ya no son las que produce
+el código, así que la búsqueda por artículo respondería sobre datos obsoletos.
+
+## Pruebas
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+Cubren el detector de artículos (con casos tomados de PDF reales de leychile.cl)
+y el filtro que descarta hallazgos que el modelo no puede fundamentar en un
+fragmento entregado.
 
 **Diseño.** Dirección editorial jurídica: papel cálido con grano, tipografías
 Fraunces (títulos) y Newsreader (prosa), acento bordeaux. El chat va en claro y
@@ -78,6 +117,11 @@ selecciona uno o más PDF e **Indexar**.
 > La autenticación la aplica el propio servidor de Gradio: sin sesión válida no
 > se puede llamar a los endpoints de carga ni de borrado.
 
+En **"Documentos indexados"**, la columna *Etiquetado* indica si cada documento
+está al día con las reglas vigentes de detección de artículos. Los que digan
+**Reindexar** se corrigen con el botón **«Reindexar desactualizados»**, que los
+reprocesa desde la copia guardada en `data/pdfs/` sin volver a subirlos.
+
 ### 2) Consultar (chat, Streamlit)
 
 ```bash
@@ -107,6 +151,10 @@ con su recomendación, ordenados por gravedad y con el fundamento normativo.
 
 - **El contrato no se guarda ni se indexa.** Se procesa en memoria y se descarta:
   contiene datos personales y contaminaría el corpus normativo.
+- ⚠️ **Pero su texto completo sí se envía al proveedor del modelo** (DeepSeek o
+  Gemini) para el análisis, con los datos personales que contenga: nombre, RUT y
+  remuneración. No queda en este equipo ni en la base, pero sale de él. La app lo
+  advierte antes de subir el archivo; si le preocupa, anonimice esos datos primero.
 - **Modo estricto.** Solo se reportan problemas respaldados por los PDF cargados.
   Los hallazgos que el modelo no logra fundamentar en un documento real de la
   base **se descartan automáticamente** y se informa cuántos fueron.
@@ -154,4 +202,13 @@ y tu pregunta se envían al proveedor, que redacta la respuesta citando las fuen
 - **No es asesoría legal.** La información es orientativa; cada respuesta incluye un
   aviso recordándolo.
 - Para reindexar un documento, simplemente vuelve a subirlo con el mismo nombre:
-  reemplaza la versión anterior.
+  reemplaza la versión anterior. Si solo cambió el detector de artículos, basta el
+  botón **«Reindexar desactualizados»**.
+- **Leyes modificatorias.** Una ley que modifica otro cuerpo legal (p. ej. la Ley
+  21.690 sobre el Código del Trabajo) cita e intercala artículos ajenos. Los
+  artículos que **inserta** se indexan correctamente, pero conviene cargar también
+  el texto refundido del Código: preguntar por un artículo cuya versión vigente no
+  está en el corpus devolverá el de la ley modificatoria, avisando de ello.
+- Si se pregunta por un artículo que no está indexado, la respuesta lo dice
+  expresamente y ofrece lo más cercano por similitud, en vez de aparentar que
+  responde a la pregunta literal.

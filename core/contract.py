@@ -55,7 +55,15 @@ def extract_text(data: bytes, filename: str) -> str:
             tmp.close()
             texto = "\n\n".join(p for p in extract_pages(tmp.name) if p.strip())
         finally:
-            os.unlink(tmp.name)
+            # En Windows no se puede borrar un archivo aún abierto: si `write`
+            # falla, un unlink a secas lanzaría PermissionError y taparía el
+            # error de verdad. Se cierra primero (es idempotente) y el borrado
+            # no puede enmascarar nada.
+            tmp.close()
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
 
     elif ext == ".docx":
         import io

@@ -34,7 +34,7 @@ def _plegar(texto: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", sin_tildes.lower()).strip()
 
 
-def _elegir_fuente(article: int, question: str, fuentes: List[str]) -> str:
+def _elegir_fuente(article: str, question: str, fuentes: List[str]) -> str:
     """Decide de qué documento mostrar el artículo pedido.
 
     Cada cuerpo legal del corpus tiene su propio "artículo 5", así que hay que
@@ -74,8 +74,12 @@ def _elegir_fuente(article: int, question: str, fuentes: List[str]) -> str:
     return sorted(candidatas)[0]
 
 
-def _search_by_article(article: int, question: str) -> List[Dict[str, object]]:
+def _search_by_article(article: str, question: str) -> List[Dict[str, object]]:
     """Recupera los fragmentos de un artículo, acotados a un solo documento.
+
+    `article` es la etiqueta canónica ("157", "157 bis"), no un número: la
+    coincidencia es exacta, de modo que preguntar por el 157 no arrastra el
+    texto del 157 bis, que es un artículo distinto.
 
     Devolver las coincidencias de todos los documentos mezclaba textos de leyes
     distintas bajo una misma respuesta, y el recorte final por MAX_ARTICLE_CHUNKS
@@ -180,7 +184,13 @@ def search(
         hits = _search_by_article(article, question)
         if hits:
             return hits
-        # Si no existe ese artículo indexado, caer a búsqueda semántica.
+        # Ese artículo no está en el corpus. Se responde por similitud, pero
+        # queda constancia: caer en silencio hace creer a quien pregunta que
+        # está leyendo el artículo que pidió, y aquí eso es una cita falsa.
+        hits = _search_semantic(question, top_k)
+        if hits:
+            hits[0]["articulo_no_hallado"] = article
+        return hits
 
     # Modo 2: búsqueda semántica.
     return _search_semantic(question, top_k)
@@ -203,7 +213,11 @@ def answer(question: str, top_k: int = TOP_K) -> Dict[str, object]:
 
     if hits and llm_available():
         try:
-            texto = generate_answer(question, hits) + otras_fuentes_md(hits)
+            texto = (
+                articulo_no_hallado_md(hits)
+                + generate_answer(question, hits)
+                + otras_fuentes_md(hits)
+            )
             return {"text": texto, "hits": hits, "mode": "llm"}
         except Exception as exc:  # noqa: BLE001 - ante cualquier fallo, caer a local
             texto = (
@@ -224,7 +238,8 @@ def format_answer(hits: List[Dict[str, object]]) -> str:
             "sobre el tema.\n\n" + LEGAL_DISCLAIMER
         )
 
-    partes = ["Esto es lo que encontré en los documentos cargados:\n"]
+    partes = [articulo_no_hallado_md(hits)]
+    partes.append("Esto es lo que encontré en los documentos cargados:\n")
     for i, hit in enumerate(hits, start=1):
         cita = f"*{hit['source']}* — pág. {hit['page']}"
         if hit.get("articulo"):
@@ -234,6 +249,22 @@ def format_answer(hits: List[Dict[str, object]]) -> str:
     partes.append(otras_fuentes_md(hits))
     partes.append("\n" + LEGAL_DISCLAIMER)
     return "\n".join(p for p in partes if p)
+
+
+def articulo_no_hallado_md(hits: List[Dict[str, object]]) -> str:
+    """Aviso de que el artículo pedido no está en el corpus.
+
+    Lo que sigue son resultados por similitud, no el artículo solicitado. Sin
+    este aviso la respuesta parece contestar la pregunta literal.
+    """
+    pedido = hits[0].get("articulo_no_hallado") if hits else None
+    if not pedido:
+        return ""
+    return (
+        f"*No encontré el artículo {pedido} en los documentos cargados. Le "
+        "muestro lo más relacionado que hay; puede que ese artículo esté en un "
+        "cuerpo legal que aún no se ha subido.*\n\n"
+    )
 
 
 def otras_fuentes_md(hits: List[Dict[str, object]]) -> str:
