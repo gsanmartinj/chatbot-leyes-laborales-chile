@@ -19,7 +19,7 @@ import os
 import re
 import tempfile
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 from .config import (
     CONTRACT_BATCH_CHARS,
@@ -127,7 +127,10 @@ def split_clauses(texto: str) -> List[Clause]:
 
     if len(cortes) >= 2:
         # El texto anterior al primer encabezado es el preámbulo (partes, fecha).
-        if cortes[0] > 60:
+        # Se conserva siempre que exista: el umbral de 60 caracteres que había
+        # antes tiraba en silencio los preámbulos cortos (un simple título
+        # "CONTRATO DE TRABAJO" quedaba fuera de la revisión).
+        if cortes[0] > 0:
             cortes.insert(0, 0)
         bloques = [
             texto[ini:fin].strip()
@@ -182,7 +185,12 @@ _SYSTEM_REVISION = (
     ' "problema": "<qué está mal, en 1-2 frases claras>",\n'
     ' "gravedad": "alta" | "media" | "baja",\n'
     ' "recomendacion": "<qué debería decir o corregirse, en 1-2 frases>",\n'
-    ' "fuentes": ["<documento, pág. N, Art. N>"]}\n\n'
+    ' "fragmento": <número del fragmento normativo que respalda el hallazgo>}\n\n'
+    "Sobre \"fragmento\": cada fragmento normativo viene rotulado como [F1], [F2], "
+    "etc. Indica el número del que respalda tu hallazgo, sin corchetes ni la F. "
+    "No escribas tú la referencia legal: la cita del documento, la página y el "
+    "artículo se toman del fragmento que señales. Un hallazgo sin número de "
+    "fragmento válido se descarta.\n\n"
     "Si no hay hallazgos respaldados, responde exactamente: []"
 )
 
@@ -199,21 +207,32 @@ _SYSTEM_OMISIONES = (
     "FORMATO: únicamente un array JSON válido, sin texto adicional. Cada elemento:\n"
     '{"clausula": "Omisión", "cita": "<qué falta>", "problema": "<por qué importa>",\n'
     ' "gravedad": "alta" | "media" | "baja", "recomendacion": "<qué agregar>",\n'
-    ' "fuentes": ["<documento, pág. N, Art. N>"]}'
+    ' "fragmento": <número del fragmento que exige esa mención>}\n\n'
+    "Los fragmentos vienen rotulados [F1], [F2], etc. Indica solo el número. No "
+    "escribas tú la referencia legal: se toma del fragmento que señales. Una "
+    "omisión sin número de fragmento válido se descarta."
 )
 
 
-def _fmt_fragmentos(hits: List[Dict[str, object]]) -> str:
-    """Formatea los fragmentos normativos con su cita."""
-    if not hits:
+def cita_de(hit: Dict[str, object]) -> str:
+    """Referencia legible de un fragmento: documento, página y artículo."""
+    cita = f"{hit.get('source', '?')}, pág. {hit.get('page', '?')}"
+    if hit.get("articulo"):
+        cita += f", Art. {hit['articulo']}"
+    return cita
+
+
+def _fmt_fragmentos(numerados: List[Tuple[int, Dict[str, object]]]) -> str:
+    """Formatea los fragmentos normativos, cada uno con su rótulo [Fn].
+
+    El rótulo es lo que permite que el modelo señale en qué se apoya sin escribir
+    él la referencia legal, que es justo donde se la inventaba.
+    """
+    if not numerados:
         return "(sin normativa relacionada en los documentos cargados)"
-    partes = []
-    for h in hits:
-        cita = f"{h.get('source', '?')}, pág. {h.get('page', '?')}"
-        if h.get("articulo"):
-            cita += f", Art. {h['articulo']}"
-        partes.append(f"[{cita}]\n{h.get('texto', '')}")
-    return "\n\n".join(partes)
+    return "\n\n".join(
+        f"[F{n}] {cita_de(h)}\n{h.get('texto', '')}" for n, h in numerados
+    )
 
 
 def _parse_json_array(texto: str) -> Optional[List[Dict]]:
@@ -237,22 +256,42 @@ def _parse_json_array(texto: str) -> Optional[List[Dict]]:
     return datos if isinstance(datos, list) else None
 
 
-def _normalizar_hallazgo(bruto: Dict) -> Optional[Dict[str, object]]:
-    """Valida y normaliza un hallazgo devuelto por el modelo."""
+def _indice_fragmento(bruto: Dict) -> Optional[int]:
+    """Número de fragmento que el modelo dice usar, tolerando '2', 'F2' o '[F2]'."""
+    valor = bruto.get("fragmento")
+    if isinstance(valor, bool):
+        return None
+    if isinstance(valor, int):
+        return valor
+    match = re.search(r"\d+", str(valor or ""))
+    return int(match.group()) if match else None
+
+
+def _normalizar_hallazgo(
+    bruto: Dict, fragmentos: Dict[int, Dict[str, object]]
+) -> Optional[Dict[str, object]]:
+    """Valida un hallazgo y le pone la cita del fragmento que lo respalda.
+
+    Devuelve None si no hay problema descrito o si el fragmento señalado no
+    existe entre los que se le entregaron. Ese descarte **es** el modo estricto:
+    antes se comparaba la cita que escribía el modelo contra los nombres de los
+    documentos, y bastaba que contuviera una subcadena como "ley" para colarse.
+    Ahora la referencia no la escribe el modelo, se toma del fragmento real.
+    """
     if not isinstance(bruto, dict):
         return None
     problema = str(bruto.get("problema", "")).strip()
     if not problema:
         return None
 
+    indice = _indice_fragmento(bruto)
+    if indice is None or indice not in fragmentos:
+        return None
+    hit = fragmentos[indice]
+
     gravedad = str(bruto.get("gravedad", "media")).strip().lower()
     if gravedad not in ("alta", "media", "baja"):
         gravedad = "media"
-
-    fuentes = bruto.get("fuentes") or []
-    if isinstance(fuentes, str):
-        fuentes = [fuentes]
-    fuentes = [str(f).strip() for f in fuentes if str(f).strip()]
 
     return {
         "clausula": str(bruto.get("clausula", "")).strip() or "Sin identificar",
@@ -260,40 +299,22 @@ def _normalizar_hallazgo(bruto: Dict) -> Optional[Dict[str, object]]:
         "problema": problema,
         "gravedad": gravedad,
         "recomendacion": str(bruto.get("recomendacion", "")).strip(),
-        "fuentes": fuentes,
+        "fuentes": [cita_de(hit)],
     }
 
 
-def _documentos_conocidos() -> List[str]:
-    """Nombres (sin extensión) de los documentos realmente indexados."""
-    from .ingest import list_documents
-
-    return [os.path.splitext(str(d["source"]))[0].lower() for d in list_documents()]
-
-
-def _filtrar_fundamentados(
-    hallazgos: List[Dict[str, object]],
+def _cosechar(
+    datos: List[Dict], fragmentos: Dict[int, Dict[str, object]]
 ) -> tuple[List[Dict[str, object]], int]:
-    """Descarta los hallazgos que no se apoyan en un documento real del corpus.
-
-    El modo estricto exige que todo hallazgo cite los PDF cargados. El prompt lo
-    pide, pero el modelo tiende a aportar conocimiento propio del Código del
-    Trabajo aunque no esté indexado, así que se verifica aquí: cada fuente debe
-    nombrar un documento que exista en la base.
-    """
-    conocidos = _documentos_conocidos()
+    """Normaliza los hallazgos de un lote y cuenta los que se descartan."""
     validos: List[Dict[str, object]] = []
     descartados = 0
-
-    for h in hallazgos:
-        fuentes = [
-            f for f in h.get("fuentes", []) if any(d and d in f.lower() for d in conocidos)
-        ]
-        if fuentes:
-            h["fuentes"] = fuentes
-            validos.append(h)
-        else:
+    for d in datos:
+        h = _normalizar_hallazgo(d, fragmentos)
+        if h is None:
             descartados += 1
+        else:
+            validos.append(h)
     return validos, descartados
 
 
@@ -314,20 +335,33 @@ def _hacer_lotes(clausulas: List[Clause]) -> List[List[Clause]]:
     return lotes
 
 
-def _prompt_lote(lote: List[Clause]) -> str:
+def _prompt_lote(lote: List[Clause]) -> Tuple[str, Dict[int, Dict[str, object]]]:
+    """Arma el prompt del lote y el índice de fragmentos que numera.
+
+    La numeración es continua en todo el lote (no por cláusula) para que un [Fn]
+    identifique un fragmento sin ambigüedad. Se devuelve el mapa para poder
+    resolver después lo que el modelo señale.
+    """
+    fragmentos: Dict[int, Dict[str, object]] = {}
     bloques = []
     for c in lote:
+        numerados: List[Tuple[int, Dict[str, object]]] = []
+        for hit in c.hits:
+            n = len(fragmentos) + 1
+            fragmentos[n] = hit
+            numerados.append((n, hit))
         bloques.append(
             f"--- CLÁUSULA {c.numero}: {c.titulo} ---\n"
             f"TEXTO DEL CONTRATO:\n{c.texto}\n\n"
-            f"FRAGMENTOS NORMATIVOS RELACIONADOS:\n{_fmt_fragmentos(c.hits)}"
+            f"FRAGMENTOS NORMATIVOS RELACIONADOS:\n{_fmt_fragmentos(numerados)}"
         )
-    return (
+    prompt = (
         "Revisa las siguientes cláusulas del contrato. Para cada una, señala los "
         "problemas que estén respaldados por sus fragmentos normativos.\n\n"
         + "\n\n".join(bloques)
         + "\n\nDevuelve el array JSON de hallazgos."
     )
+    return prompt, fragmentos
 
 
 def review_contract(
@@ -363,11 +397,13 @@ def review_contract(
     lotes = _hacer_lotes(clausulas)
     hallazgos: List[Dict[str, object]] = []
     avisos: List[str] = []
+    descartados = 0
 
     for i, lote in enumerate(lotes, start=1):
         avisar(0.30 + 0.55 * (i - 1) / max(len(lotes), 1), f"Analizando ({i}/{len(lotes)})…")
+        prompt, fragmentos = _prompt_lote(lote)
         try:
-            salida = chat(_SYSTEM_REVISION, _prompt_lote(lote), max_tokens=1600)
+            salida = chat(_SYSTEM_REVISION, prompt, max_tokens=1600)
         except Exception as exc:  # noqa: BLE001
             avisos.append(f"No se pudo analizar el bloque {i}: {exc}")
             continue
@@ -376,21 +412,23 @@ def review_contract(
         if datos is None:
             avisos.append(f"El modelo devolvió un formato inesperado en el bloque {i}.")
             continue
-        hallazgos.extend(h for h in (_normalizar_hallazgo(d) for d in datos) if h)
+        validos, fuera = _cosechar(datos, fragmentos)
+        hallazgos.extend(validos)
+        descartados += fuera
 
     # Pasada final: omisiones, solo si el corpus establece exigencias de contenido.
     avisar(0.88, "Buscando omisiones…")
     try:
-        hallazgos.extend(_revisar_omisiones(texto))
+        omisiones, fuera = _revisar_omisiones(texto)
+        hallazgos.extend(omisiones)
+        descartados += fuera
     except Exception as exc:  # noqa: BLE001
         avisos.append(f"No se pudo revisar las omisiones: {exc}")
 
-    # Modo estricto: solo sobrevive lo respaldado por los documentos cargados.
-    hallazgos, descartados = _filtrar_fundamentados(hallazgos)
     if descartados:
         avisos.append(
-            f"Se descartaron {descartados} observación(es) porque el modelo no "
-            "las respaldó con los documentos cargados. Cargue más normativa "
+            f"Se descartaron {descartados} observación(es) porque el modelo no las "
+            "apoyó en ninguno de los fragmentos entregados. Cargue más normativa "
             "(por ejemplo, el Código del Trabajo) para ampliar la revisión."
         )
 
@@ -406,8 +444,11 @@ def review_contract(
     }
 
 
-def _revisar_omisiones(texto: str) -> List[Dict[str, object]]:
-    """Detecta menciones exigidas por el corpus que el contrato no contiene."""
+def _revisar_omisiones(texto: str) -> Tuple[List[Dict[str, object]], int]:
+    """Detecta menciones exigidas por el corpus que el contrato no contiene.
+
+    Devuelve (omisiones, descartadas).
+    """
     consultas = [
         "menciones obligatorias que debe contener el contrato de trabajo",
         "estipulaciones del contrato de trabajo escrituración",
@@ -415,24 +456,27 @@ def _revisar_omisiones(texto: str) -> List[Dict[str, object]]:
     hits: List[Dict[str, object]] = []
     vistos = set()
     for q in consultas:
-        for h in search(q, top_k=CONTRACT_TOP_K):
+        # Sin atajo por artículo: son consultas temáticas, no referencias.
+        for h in search(q, top_k=CONTRACT_TOP_K, modo_articulo=False):
             clave = (h.get("source"), h.get("page"), str(h.get("texto"))[:60])
             if clave not in vistos:
                 vistos.add(clave)
                 hits.append(h)
 
     if not hits:
-        return []
+        return [], 0
 
+    fragmentos = {n: h for n, h in enumerate(hits, start=1)}
     prompt = (
         f"CONTRATO A REVISAR:\n{texto[:12000]}\n\n"
-        f"FRAGMENTOS NORMATIVOS SOBRE EL CONTENIDO EXIGIDO:\n{_fmt_fragmentos(hits)}\n\n"
+        f"FRAGMENTOS NORMATIVOS SOBRE EL CONTENIDO EXIGIDO:\n"
+        f"{_fmt_fragmentos(list(fragmentos.items()))}\n\n"
         "Devuelve el array JSON con las omisiones respaldadas por los fragmentos."
     )
     datos = _parse_json_array(chat(_SYSTEM_OMISIONES, prompt, max_tokens=1200))
     if not datos:
-        return []
-    return [h for h in (_normalizar_hallazgo(d) for d in datos) if h]
+        return [], 0
+    return _cosechar(datos, fragmentos)
 
 
 def report_markdown(resultado: Dict[str, object], nombre: str = "contrato") -> str:
